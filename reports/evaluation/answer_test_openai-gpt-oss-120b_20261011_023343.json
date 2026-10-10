@@ -1,0 +1,68 @@
+{
+  "model": "openai/gpt-oss-120b",
+  "status": "selesai",
+  "rencana": [
+    "H28"
+  ],
+  "belum_selesai": [],
+  "results": [
+    {
+      "id": "H28",
+      "pertanyaan": "ump disini 3,5jt, penghasilan minimal dosen lektor kepala brp?",
+      "jawaban_benar": "Lektor kepala minimal **Rp14.000.000**.",
+      "halaman_kunci": [
+        60
+      ],
+      "harapan_angka": {
+        "lektor_kepala": 14000000
+      },
+      "catatan": "Ketahanan: '3,5jt' = Rp3.500.000. Argumen ump harus rupiah penuh, bukan 3.5.",
+      "lulus": true,
+      "jawaban": "Penghasilan minimal untuk dosen dengan jabatan **Lektor Kepala** adalah 4 × UMP. Dengan UMP sebesar **Rp 3,5 jt**, maka:\n\n- UMP = Rp 3.500.000  \n- Lektor Kepala ≥ 4 × UMP = 4 × Rp 3.500.000 = **Rp 14.000.000**  \n\nJadi, penghasilan minimal dosen Lektor Kepala adalah **Rp 14.000.000**. [hasil perhitungan dari fungsi hitung_iku]",
+      "sitasi": [],
+      "sumber_rumus": [
+        "Buku IKU Diktisaintek Berdampak V1, IKU 12 – Kriteria b.2, hlm. 60"
+      ],
+      "kalkulator": [
+        {
+          "argumen": "{\"argumen_json\":\"{\\\"ump\\\":\\\"Rp3,5jt\\\",\\\"jabatan\\\":[\\\"lektor_kepala\\\"]}\",\"fungsi\":\"iku12_penghasilan_minimum\"}",
+          "hasil": {
+            "id": "iku12_penghasilan_minimum",
+            "ikuCode": "IKU 012",
+            "hasil": {
+              "lektor_kepala": 14000000.0
+            },
+            "satuan": "Rp",
+            "langkah": [
+              "UMP: \"Rp3,5jt\" = Rp3.500.000",
+              "lektor_kepala: ≥ 4 × UMP = 4 × Rp3.500.000 = Rp14.000.000"
+            ],
+            "formula_teks": [
+              "Penghasilan minimum = kelipatan jabatan × UMP (asisten ahli 1,5; lektor 3; lektor kepala 4; profesor 6)"
+            ],
+            "sumber": "Buku IKU Diktisaintek Berdampak V1, IKU 12 – Kriteria b.2, hlm. 60",
+            "rujukan": {
+              "dokumen": "Buku IKU Diktisaintek Berdampak",
+              "versi": "V1",
+              "bagian": "IKU 12 – Kriteria b.2",
+              "halaman": [
+                60
+              ]
+            },
+            "status": "terverifikasi"
+          }
+        }
+      ],
+      "peringatan": [
+        "Panggilan alat ditolak server (nama alat 'hit...' tidak dikenal); diulang otomatis.",
+        "Jawaban tidak memuat rujukan [n] ke konteks."
+      ],
+      "cek": {
+        "kalkulator dipanggil": true,
+        "hasil kalkulator = kunci": true,
+        "angka kunci ada di jawaban": true,
+        "halaman sitasi benar": true
+      }
+    }
+  ]
+}

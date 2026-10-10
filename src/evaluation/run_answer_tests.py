@@ -49,7 +49,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "evaluation"))
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "generation"))
 
 from eval_retrieval import load_test_set, TEST_SET_FILE  # noqa: E402
-from answer import Chatbot, varian_angka  # noqa: E402
+from answer import Chatbot  # noqa: E402
+from postproses import angka_muncul  # noqa: E402
 
 INPUTS_HITUNG = PROJECT_ROOT / "data" / "evaluation" / "test_inputs_hitung.json"
 FAKTA_DEFINISI = PROJECT_ROOT / "data" / "evaluation" / "test_fakta_definisi.json"
@@ -138,8 +139,7 @@ def cek_hitungan(hasil: dict, kasus: dict, halaman_kunci: list[int]) -> dict:
     return {
         "kalkulator dipanggil": bool(berhasil),
         "hasil kalkulator = kunci": any(sama(k["hasil"]["hasil"], harapan) for k in berhasil),
-        "angka kunci ada di jawaban": all(
-            any(v in hasil["jawaban"] for v in varian_angka(x)) for x in nilai_kunci(harapan)),
+        "angka kunci ada di jawaban": all(angka_muncul(x, hasil["jawaban"]) for x in nilai_kunci(harapan)),
         "halaman sitasi benar": cek_halaman(hasil, halaman_kunci),
     }
 

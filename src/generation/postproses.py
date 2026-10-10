@@ -28,6 +28,36 @@ def rapikan_jawaban(teks: str) -> str:
     return RUJUKAN_BAWAAN.sub(r"[\1]", teks.translate(SPASI_KHUSUS))
 
 
+def varian_angka(nilai) -> list[str]:
+    """Bentuk tulisan yang wajar untuk sebuah angka: 21.5 -> ['21.5', '21,5', '21,50', ...]."""
+    if isinstance(nilai, bool) or not isinstance(nilai, (int, float)):
+        return [str(nilai)]
+    dua_desimal = f"{nilai:.2f}"
+    ringkas = dua_desimal.rstrip("0").rstrip(".")
+    varian = {ringkas, ringkas.replace(".", ","), dua_desimal, dua_desimal.replace(".", ",")}
+    if float(nilai).is_integer():
+        bulat = int(nilai)
+        varian |= {f"{bulat:,}".replace(",", "."), f"{bulat:,}", str(bulat)}
+    # nominal rupiah besar sering ditulis "14 juta" / "1,25 miliar"
+    for besar, satuan in ((10 ** 9, "miliar"), (10 ** 6, "juta")):
+        if abs(nilai) >= besar:
+            angka = f"{nilai / besar:.3f}".rstrip("0").rstrip(".")
+            varian |= {f"{angka} {satuan}", f"{angka.replace('.', ',')} {satuan}"}
+            break
+    return sorted(varian)
+
+
+def angka_muncul(nilai, jawaban: str) -> bool:
+    """True bila angka itu tertulis UTUH di jawaban. Tidak cukup memeriksa 'x in jawaban': kasus H28,
+    hasil kalkulator 14.000 dianggap muncul karena '14,000' ada di dalam '14,000,000' (jawaban
+    yang salah). Angka tidak boleh bersambung dengan angka lain di depan atau belakangnya."""
+    for v in varian_angka(nilai):
+        pola = r"(?<!\d)(?<!\d[.,])" + re.escape(v) + r"(?!\d)(?![.,]\d)"
+        if re.search(pola, jawaban, re.I):
+            return True
+    return False
+
+
 def tampak_menghitung_sendiri(pertanyaan: str, jawaban: str) -> bool:
     """True bila jawaban (yang dibuat TANPA hasil kalkulator) memuat perhitungan angka,
     rumus LaTeX, atau penentuan predikat dari nilai yang diberikan pengguna."""

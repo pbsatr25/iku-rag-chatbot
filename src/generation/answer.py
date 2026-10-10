@@ -23,7 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "generation"))
 
 from retriever import Retriever  # noqa: E402
 from llm_client import get_client  # noqa: E402
-from postproses import rapikan_jawaban, tampak_menghitung_sendiri  # noqa: E402
+from postproses import angka_muncul, rapikan_jawaban, tampak_menghitung_sendiri, varian_angka  # noqa: E402,F401
 from prompt import SYSTEM_PROMPT, build_user_message  # noqa: E402
 from tools import NAMA_ALAT, TOOL_HITUNG_IKU, jalankan_alat  # noqa: E402
 
@@ -74,25 +74,6 @@ def format_sitasi(chunk: dict) -> str:
     return teks
 
 
-def varian_angka(nilai) -> list[str]:
-    """Bentuk tulisan yang wajar untuk sebuah angka: 21.5 -> ['21.5', '21,5', '21,50', ...]."""
-    if isinstance(nilai, bool) or not isinstance(nilai, (int, float)):
-        return [str(nilai)]
-    dua_desimal = f"{nilai:.2f}"
-    ringkas = dua_desimal.rstrip("0").rstrip(".")
-    varian = {ringkas, ringkas.replace(".", ","), dua_desimal, dua_desimal.replace(".", ",")}
-    if float(nilai).is_integer():
-        bulat = int(nilai)
-        varian |= {f"{bulat:,}".replace(",", "."), f"{bulat:,}", str(bulat)}
-    # nominal rupiah besar sering ditulis "14 juta" / "1,25 miliar"
-    for besar, satuan in ((10 ** 9, "miliar"), (10 ** 6, "juta")):
-        if abs(nilai) >= besar:
-            angka = f"{nilai / besar:.3f}".rstrip("0").rstrip(".")
-            varian |= {f"{angka} {satuan}", f"{angka.replace('.', ',')} {satuan}"}
-            break
-    return sorted(varian)
-
-
 def periksa_jawaban(pertanyaan: str, jawaban: str, chunks: list[dict],
                     hasil_alat: list[dict]) -> tuple[list[str], list[str]]:
     """Ubah rujukan [n] menjadi daftar sitasi dan kumpulkan peringatan."""
@@ -109,7 +90,7 @@ def periksa_jawaban(pertanyaan: str, jawaban: str, chunks: list[dict],
         nilai = h["hasil"]["hasil"]
         semua = list(nilai.values()) if isinstance(nilai, dict) else [nilai]
         for v in semua:
-            if not any(x in jawaban for x in varian_angka(v)):
+            if not angka_muncul(v, jawaban):
                 peringatan.append(f"Hasil kalkulator {v} tidak muncul di jawaban; periksa apakah LLM mengubah angkanya.")
 
     soal_hitungan = re.search(r"\d", pertanyaan) and re.search(r"\b(berapa|hitung)", pertanyaan, re.I)

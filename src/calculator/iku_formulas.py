@@ -118,6 +118,7 @@ PENDAPATAN_TIDAK_DIAKUI = set(_K["pendapatan_tidak_diakui"])
 PREDIKAT_SAKIP = sorted(((p["nilai_min"], p["predikat"]) for p in _K["predikat_sakip"]), reverse=True)
 KELIPATAN_UMP = _K["kelipatan_ump"]
 SATUAN_NOMINAL = _K["satuan_nominal"]
+UMP_MINIMUM = _K["batas_wajar"]["ump_minimum_rupiah"]
 
 # kode rasio -> (label pembilang, label penyebut, bagian sumber)
 RASIO = {r["id"]: (r["input"]["pembilang"], r["input"]["penyebut"], r["sumber"]["bagian"])
@@ -134,12 +135,32 @@ RASIO = {r["id"]: (r["input"]["pembilang"], r["input"]["penyebut"], r["sumber"][
 _NOMINAL_RE = re.compile(r"^(?:rp\.?)?\s*(\d[\d.,]*)\s*([a-z]*)\.?$")
 
 
-def _angka_id(teks: str) -> float:
-    """Angka gaya Indonesia: koma = desimal; titik diikuti tepat 3 angka = pemisah ribuan.
-    '1.250.000' -> 1250000, '0,2' -> 0.2, '4.250' -> 4250, '1.5' -> 1.5, '1.250.000,5' -> 1250000.5"""
+def _kelompok_ribuan(teks: str, pemisah: str) -> bool:
+    """'3,500,000' (pemisah ',') -> True: 1-3 angka di depan, lalu kelompok tepat 3 angka."""
+    bagian = teks.split(pemisah)
+    return len(bagian) > 1 and 1 <= len(bagian[0]) <= 3 and all(len(b) == 3 for b in bagian[1:])
+
+
+def _angka_id(teks: str, tanpa_satuan: bool = False) -> float:
+    """Angka gaya Indonesia maupun Inggris. Aturan pemisah:
+    - titik DAN koma: yang paling kanan = desimal, yang lain = ribuan
+      ('1.250.000,5' dan '1,250,000.5' -> 1250000.5)
+    - koma saja, beberapa kelompok 3 angka = ribuan ('3,500,000' -> 3500000; kasus H28)
+    - koma tunggal: desimal ('0,2' -> 0.2), KECUALI nominal tanpa satuan dengan 3 angka di belakang koma
+      ('Rp3,500' -> 3500), karena Rp3,5 dan Rp3,500 tidak mungkin bermakna 3,5 rupiah
+    - titik saja: kelompok 3 angka = ribuan ('1.250.000', '4.250'), selain itu desimal ('1.5')"""
+    if "," in teks and "." in teks:
+        if teks.rfind(",") > teks.rfind("."):
+            return float(teks.replace(".", "").replace(",", "."))
+        return float(teks.replace(",", ""))
     if "," in teks:
-        bulat, _, desimal = teks.rpartition(",")
-        return float(bulat.replace(".", "").replace(",", "") + "." + desimal)
+        if teks.count(",") > 1:
+            if not _kelompok_ribuan(teks, ","):
+                raise ValueError(f"angka '{teks}' tidak jelas")
+            return float(teks.replace(",", ""))
+        if tanpa_satuan and _kelompok_ribuan(teks, ","):
+            return float(teks.replace(",", ""))
+        return float(teks.replace(",", "."))
     bagian = teks.split(".")
     if len(bagian) > 1 and all(len(b) == 3 for b in bagian[1:]):
         return float("".join(bagian))
@@ -163,7 +184,7 @@ def baca_nominal(nilai, nama: str) -> tuple[float, str | None]:
                          f"mis. \"300 jt\", \"0,2 M\", \"Rp1.250.000.000\" (satuan: "
                          f"{', '.join(s for s in SATUAN_NOMINAL if s)})")
     try:
-        angka = _angka_id(m.group(1).rstrip(".,"))
+        angka = _angka_id(m.group(1).rstrip(".,"), tanpa_satuan=m.group(2) == "")
     except ValueError as e:
         raise ValueError(f"{nama} '{asli}' tidak terbaca: {e}") from None
     return angka * SATUAN_NOMINAL[m.group(2)], asli
@@ -390,6 +411,10 @@ def iku12_penghasilan_minimum(ump: float | str, jabatan: list[str]) -> dict:
     """ump dalam rupiah penuh, atau teks seperti di pertanyaan ("3,5jt", "Rp 4.250.000")."""
     ump, ump_asli = baca_nominal(ump, "UMP")
     _wajib_positif(ump, "UMP")
+    if ump < UMP_MINIMUM:
+        # kemungkinan besar salah baca satuan atau pemisah ribuan (kasus H28: Rp3.500 alih-alih Rp3.500.000)
+        raise ValueError(f"UMP Rp{_fmt(ump)} tidak wajar (di bawah Rp{_fmt(UMP_MINIMUM)}); periksa satuan atau "
+                         f"pemisah ribuan, dan tulis nominal persis seperti di pertanyaan")
     hasil = {}
     langkah = [f"UMP: {_tulis_nominal(ump, ump_asli)}"] if ump_asli else []
     for j in jabatan:

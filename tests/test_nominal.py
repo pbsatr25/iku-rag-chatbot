@@ -35,12 +35,21 @@ from iku_formulas import baca_nominal, iku9, iku12_penghasilan_minimum
     ("1 T", 1_000_000_000_000),
     (1_250_000_000, 1_250_000_000),       # angka biasa tetap diterima
     (2.5, 2.5),
+    # pemisah gaya Inggris (koma ribuan, titik desimal), kasus H28: "Rp3,500,000" terbaca Rp3.500
+    ("Rp3,500,000", 3_500_000),
+    ("Rp 3,500,000", 3_500_000),
+    ("Rp3,500,000.50", 3_500_000.5),
+    ("1,250,000,000", 1_250_000_000),
+    ("Rp1.250.000,5", 1_250_000.5),       # gaya Indonesia dengan desimal tetap benar
+    ("Rp3,500", 3_500),                   # tanpa satuan: 3 angka di belakang koma = ribuan
+    ("3,5jt", 3_500_000),                 # dengan satuan: koma tunggal tetap desimal
+    ("3,500 jt", 3_500_000),
 ])
 def test_baca_nominal(teks, rupiah):
     assert baca_nominal(teks, "x")[0] == pytest.approx(rupiah)
 
 
-@pytest.mark.parametrize("teks", ["dua juta", "300 jeti", "1.2.3", "Rp", "", True])
+@pytest.mark.parametrize("teks", ["dua juta", "300 jeti", "1.2.3", "Rp", "", True, "1,23,456", "Rp3,5000,000"])
 def test_nominal_tak_terbaca_jadi_pesan_error(teks):
     with pytest.raises(ValueError):
         baca_nominal(teks, "x")
@@ -77,7 +86,16 @@ def test_iku9_campuran_teks_dan_angka_ditolak():
 
 @pytest.mark.parametrize("ump, jabatan, harapan", [
     ("3,5jt", ["lektor_kepala"], {"lektor_kepala": 14_000_000}),                                  # H28
+    ("Rp3,500,000", ["lektor_kepala"], {"lektor_kepala": 14_000_000}),                            # H28 run 10 Okt
+    ("Rp 3.500.000", ["lektor_kepala"], {"lektor_kepala": 14_000_000}),
     ("Rp 4.250.000", ["asisten_ahli", "profesor"], {"asisten_ahli": 6_375_000, "profesor": 25_500_000}),  # H29
 ])
 def test_iku12_dengan_nominal_teks(ump, jabatan, harapan):
     assert iku12_penghasilan_minimum(ump, jabatan)["hasil"] == pytest.approx(harapan)
+
+
+@pytest.mark.parametrize("ump", ["Rp3,5", "Rp3", 3500, 50_000])
+def test_iku12_ump_tidak_wajar_ditolak(ump):
+    # UMP di bawah Rp100.000 hampir pasti salah baca satuan atau pemisah ribuan
+    with pytest.raises(ValueError, match="tidak wajar"):
+        iku12_penghasilan_minimum(ump, ["lektor"])

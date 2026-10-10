@@ -8,7 +8,7 @@ sitasi dan fakta kunci tidak terbaca walaupun isi jawabannya benar.
 
 import pytest
 
-from postproses import rapikan_jawaban, tampak_menghitung_sendiri
+from postproses import angka_muncul, rapikan_jawaban, tampak_menghitung_sendiri
 
 
 @pytest.mark.parametrize("asli, harapan", [
@@ -26,6 +26,33 @@ def test_rapikan_jawaban(asli, harapan):
 
 def test_teks_lain_dalam_kurung_khusus_tidak_diubah():
     assert rapikan_jawaban("catatan【lihat lampiran】") == "catatan【lihat lampiran】"
+
+
+@pytest.mark.parametrize("nilai, jawaban", [
+    (14_000_000, "Penghasilan minimal Rp14.000.000."),
+    (14_000_000, "Penghasilan minimal Rp.14.000.000,-"),
+    (14_000_000, "sebesar **Rp 14,000,000** per bulan"),
+    (14_000_000, "yaitu 14 juta rupiah"),
+    (25.0, "Capaian IKU 9 adalah **25%**."),
+    (7.2, "hasilnya 7,2 % [1]"),
+    (0.76, "Capaian = 0,76%"),
+    ("A (sangat baik)", "predikatnya **A (Sangat Baik)**"),
+])
+def test_angka_muncul(nilai, jawaban):
+    assert angka_muncul(nilai, jawaban)
+
+
+@pytest.mark.parametrize("nilai, jawaban", [
+    # kasus H28: kalkulator 14.000, AI menulis 14.000.000 (angka itu hanya potongan dari yang lain)
+    (14_000, "4 × Rp 3,500,000 = **Rp 14,000,000**"),
+    (14_000, "Rp14.000.000"),
+    (25.0, "Capaian 125%"),
+    (25.0, "Capaian 25,5%"),
+    (7.2, "hasilnya 17,2%"),
+    (785, "ada 1.785 responden"),
+])
+def test_angka_tidak_muncul_bila_hanya_potongan_angka_lain(nilai, jawaban):
+    assert not angka_muncul(nilai, jawaban)
 
 
 # potongan jawaban asli laporan 2026-10-09 yang dibuat TANPA kalkulator
