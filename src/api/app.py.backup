@@ -1,0 +1,195 @@
+"""
+FastAPI server untuk RAG service IKU.
+
+Endpoint:
+  - POST /v1/answer: Jawab pertanyaan menggunakan RAG + kalkulator IKU
+  - GET /health: Health check
+"""
+
+import os
+import re
+import sys
+from pathlib import Path
+
+import openai
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
+
+# Setup path untuk import internal modules
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "retrieval"))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "generation"))
+
+from answer import Chatbot  # noqa: E402
+from prompt import SYSTEM_PROMPT, build_user_message  # noqa: E402
+
+# Inisialisasi Chatbot sekali saat startup (bukan per-request)
+bot: Chatbot | None = None
+
+
+def get_chatbot() -> Chatbot:
+    """Lazy initialization Chatbot."""
+    global bot
+    if bot is None:
+        print("Initializing Chatbot...")
+        bot = Chatbot()
+        print(f"Chatbot ready (model: {bot.model})")
+    return bot
+
+
+def detect_intent(question: str) -> str:
+    """
+    Detect intent pertanyaan menggunakan LLM.
+    Returns: "definisi", "formula", atau "data"
+    """
+    intent_system_prompt = """Anda adalah classifier pertanyaan. Tugas Anda mengklasifikasikan pertanyaan pengguna menjadi satu dari tiga kategori:
+- "definisi": Pertanyaan tentang definisi atau penjelasan IKU
+- "formula": Pertanyaan tentang formula/rumus perhitungan IKU
+- "data": Pertanyaan yang meminta data/spreadsheet dari kampus (kata kunci: nilai, jumlah, berapa, data kampus, PT, fakultas, program studi)
+
+Format jawaban HANYA: satu kata tanpa teks tambahan (definisi/formula/data)."""
+
+    try:
+        messages = [
+            {"role": "system", "content": intent_system_prompt},
+            {"role": "user", "content": f"Pertanyaan: {question}"},
+        ]
+        response = bot.client.chat.completions.create(
+            model=bot.model,
+            messages=messages,
+            temperature=0,
+            max_tokens=10,
+        )
+        intent = response.choices[0].message.content.strip().lower()
+        if intent in ["definisi", "formula", "data"]:
+            return intent
+        return "definisi"
+    except Exception:
+        return "definisi"
+
+
+def format_response(hasil: dict, intent: str) -> dict:
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Inisialisasi Chatbot saat startup."""
+    global bot
+    if bot is None:
+        print("Initializing Chatbot on startup...")
+        bot = Chatbot()
+        print(f"Chatbot ready (model: {bot.model})")
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "ok"}
+
+
+@app.post("/v1/answer")
+async def answer(
+    question: dict,
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+):
+    """
+    Jawab pertanyaan menggunakan RAG + kalkulator IKU.
+
+    Body:
+        - question: string
+        - scope: object atau null (opsional)
+
+    Response:
+        - answer: string
+        - citations: list (dari sitasi)
+        - grounded: boolean
+        - outOfScope: boolean atau null
+        - action: null
+    """
+    # Cek token autentikasi
+    expected_token = os.getenv("RAG_SERVICE_TOKEN")
+    if expected_token is None:
+        raise HTTPException(
+            status_code=500,
+            detail="RAG_SERVICE_TOKEN tidak dikonfigurasi di environment",
+        )
+
+    if x_internal_token != expected_token:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid token")
+
+    # Parse request
+    q = question.get("question", "")
+    scope = question.get("scope")
+
+    if not q:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "question is required"},
+        )
+
+    try:
+        chatbot = get_chatbot()
+        hasil = chatbot.ask(q)
+
+        # Mapping jawaban dari Chatbot.ask() ke format RAGResponse
+        # - jawaban → answer
+        # - sitasi → citations (format: ["[1] Buku IKU Diktisaintek Berdampak V1, hlm. 53 (IKU 003)"])
+        # - grounded: true jika ada sitasi
+        # - outOfScope: null (belum diimplementasi)
+        # - action: null
+
+        citations = []
+        for sitasi in hasil.get("sitasi", []):
+            # Parse format "[1] Buku IKU..., hlm. 53 (IKU 003)"
+            match = re.search(r"\[(\d+)\]\s*(.+?),\s*hlm\.\s*(\d+)(?:–(\d+))?\s*(?:\((.+)\))?", sitasi)
+            if match:
+                chunk_num = match.group(1)
+                doc_title = match.group(2).strip()
+                page_start = int(match.group(3))
+                page_end = int(match.group(4)) if match.group(4) else page_start
+                iku_id = match.group(5)
+                citations.append({
+                    "id": f"CHUNK_{chunk_num}",
+                    "documentTitle": doc_title,
+                    "documentVersion": "V1",
+                    "page": page_start,
+                    "page_end": page_end,
+                    "ikuCode": iku_id if iku_id and iku_id != "" else None,
+                })
+
+        grounded = len(hasil.get("sitasi", [])) > 0
+
+        return {
+            "answer": hasil.get("jawaban", ""),
+            "citations": citations,
+            "grounded": grounded,
+            "outOfScope": None,
+            "action": None,
+        }
+
+    except openai.RateLimitError:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "LLM rate limit exceeded"},
+        )
+    except openai.APITimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "LLM request timeout"},
+        )
+    except (openai.APIConnectionError, openai.APIStatusError) as e:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"LLM service error: {str(e)}"},
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal server error: {str(e)}"},
+        )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
