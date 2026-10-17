@@ -59,100 +59,43 @@ def get_chatbot() -> Chatbot:
     return bot
 
 
-def detect_intent_llm(question: str, llm_client, model: str) -> str:
+def detect_intent(question: str) -> str:
     """
-    Detect intent pertanyaan menggunakan LLM dengan few-shot examples + post-processing safeguard.
+    Detect intent pertanyaan dengan keyword-based pattern matching.
     Returns: "definisi", "formula", atau "data"
+    
+    Priority:
+    1. "data" - jika menyebut "saya", "kampus saya", "pt saya", "data kampus/saya"
+    2. "formula" - jika tanya "rumus", "cara hitung"
+    3. "definisi" - default (tanya konsep/penjelasan IKU)
     """
-    # Safeguard: jika pertanyaan tidak ada tahun/periode, langsung return "definisi"
-    q_lower = question.lower()
-    has_year_or_period = bool(re.search(r"\b(20[12]\d|tahun|periode|semester|triwulan)\b", q_lower))
-    has_explicit_data = "data kampus" in q_lower or "data iku" in q_lower
-    
-    if not has_year_or_period and not has_explicit_data:
-        # Tidak ada konteks waktu/data eksplisit → pasti definisi/formula
-        logger.info(f"Safeguard: No time context in '{question}', forced to definisi/formula")
-        if any(kw in q_lower for kw in ["rumus", "formula", "cara hitung"]):
-            return "formula"
-        return "definisi"
-    
-    # Ada konteks waktu/data → tanya LLM
-    system_prompt = """Kamu adalah classifier untuk pertanyaan tentang IKU (Indikator Kinerja Utama) perguruan tinggi.
-
-Tugas: Klasifikasikan intent pertanyaan ke salah satu dari 3 kategori:
-1. "definisi" - Pertanyaan tentang konsep, pengertian, atau penjelasan IKU
-2. "formula" - Pertanyaan tentang rumus atau cara menghitung IKU  
-3. "data" - Pertanyaan tentang data AKTUAL kampus user dari spreadsheet/database
-
-ATURAN KETAT untuk "data":
-- HARUS ada konteks waktu (tahun, semester, periode) ATAU frasa eksplisit "data kampus"
-- Jika hanya "berapa nilai IKU X saya" tanpa tahun → "definisi" (tanya konsep, bukan data aktual)
-
-Return HANYA satu kata: definisi, formula, atau data"""
-
-    user_prompt = f"""Pertanyaan: "{question}"
-
-Contoh klasifikasi:
-- "Apa itu IKU 1?" → definisi
-- "Berapa nilai IKU 3?" → definisi (tanya konsep angka IKU, bukan data kampus)
-- "Berapa nilai IKU 3 saya?" → definisi (tidak ada tahun, tanya konsep)
-- "Rumus IKU 1 apa?" → formula
-- "Bagaimana cara hitung IKU 2?" → formula
-- "Berapa nilai IKU 3 kampus saya tahun 2024?" → data (ada tahun!)
-- "Data IKU 1 kampus saya periode 2023" → data (ada periode!)
-- "Capaian IKU 2 kampus saya semester 1" → data (ada semester!)
-
-Klasifikasi untuk pertanyaan di atas:"""
-
-    try:
-        response = llm_client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.0,
-            max_tokens=10
-        )
-        
-        intent = response.choices[0].message.content.strip().lower()
-        
-        # Validasi output dan cleanup
-        if "definisi" in intent:
-            intent = "definisi"
-        elif "formula" in intent:
-            intent = "formula"
-        elif "data" in intent:
-            intent = "data"
-        
-        if intent in ["definisi", "formula", "data"]:
-            logger.info(f"LLM detected intent: {intent} for question: {question}")
-            return intent
-        else:
-            logger.warning(f"LLM returned invalid intent '{intent}', defaulting to 'definisi'")
-            return "definisi"
-            
-    except Exception as e:
-        logger.error(f"Error in LLM intent detection: {e}, falling back to keyword-based")
-        return detect_intent_fallback(question)
-
-
-def detect_intent_fallback(question: str) -> str:
-    """Fallback keyword-based detection jika LLM gagal."""
     q_lower = question.lower()
     
-    # Cek formula keywords
-    if any(kw in q_lower for kw in ["rumus", "formula", "cara hitung", "cara menghitung"]):
-        return "formula"
+    # Intent: DATA - deteksi kata "saya" yang merujuk ke data kampus user
+    # Pattern: "IKU X saya", "kampus saya", "nilai saya", "data saya", "capaian saya"
+    data_patterns = [
+        r"\biku\s+\d+\s+saya\b",           # "IKU 1 saya", "IKU 3 saya"
+        r"\bnilai\s+(iku\s+\d+\s+)?saya\b",  # "nilai IKU 1 saya", "nilai saya"
+        r"\bkampus\s+saya\b",
+        r"\bpt\s+saya\b",
+        r"\bdata\s+(kampus|saya|kami)\b",
+        r"\bcapaian\s+(iku\s+\d+\s+)?saya\b",
+        r"\bberapa\s+(nilai\s+)?iku\s+\d+\s+saya\b",  # "berapa IKU 1 saya", "berapa nilai IKU 3 saya"
+    ]
     
-    # Cek data keywords (harus ada tahun/periode)
-    has_year = bool(re.search(r"\b(20[12]\d|tahun|periode|semester)\b", q_lower))
-    has_campus = any(kw in q_lower for kw in ["kampus saya", "data saya", "data kampus"])
-    
-    if has_campus and has_year:
+    if any(re.search(pattern, q_lower) for pattern in data_patterns):
         return "data"
     
+    # Intent: FORMULA
+    formula_keywords = ["rumus", "formula", "cara hitung", "cara menghitung", "bagaimana menghitung"]
+    if any(kw in q_lower for kw in formula_keywords):
+        return "formula"
+    
+    # Intent: DEFINISI (default)
     return "definisi"
+
+
+
 
 
 def format_response(hasil: dict, intent: str) -> dict:
@@ -270,7 +213,7 @@ async def answer(
             response["action"] = None  # Sudah diproses, tidak perlu fetch lagi
             return response
 
-        intent = detect_intent_llm(q, chatbot.client, chatbot.model)
+        intent = detect_intent(q)
 
         if intent == "data":
             # Untuk pertanyaan data, kembalikan instruksi untuk fetch data
