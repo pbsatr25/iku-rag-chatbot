@@ -1,8 +1,8 @@
 """
 tools.py
-Alat (tool) yang boleh dipanggil LLM. Hanya satu: `hitung_iku`, yaitu jembatan ke
-kalkulator IKU (src/calculator/iku_formulas.py). LLM tidak menghitung sendiri;
-ia memilih fungsi dan mengisi argumennya, lalu kalkulator yang menghitung.
+Alat (tool) yang boleh dipanggil LLM:
+- `hitung_iku`: untuk menghitung IKU dari rumus resmi
+- `query_spreadsheet`: untuk mengambil data spreadsheet user
 
 Daftar kunci (kategori IKU 2, bobot prestasi, jenis publikasi, dst.) diambil
 langsung dari kalkulator, jadi petunjuk untuk LLM selalu sama dengan kodenya.
@@ -14,8 +14,10 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "calculator"))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "generation"))
 
 import iku_formulas as calc  # noqa: E402
+from spreadsheet_tool import format_spreadsheet_context, get_spreadsheet_data_for_user  # noqa: E402
 
 
 def _daftar(items) -> str:
@@ -152,4 +154,82 @@ def jalankan_alat(nama: str, argumen_teks: str) -> dict:
                          f"{inspect.signature(calc.REGISTRY[fungsi])}"}
     except (KeyError, ValueError, ZeroDivisionError) as e:
         return {"error": f"{type(e).__name__}: {e}. Periksa nama fungsi dan format argumen."}
+
+
+# ==============================================================================
+# SPREADSHEET TOOL
+# ==============================================================================
+
+TOOL_QUERY_SPREADSHEET = {
+    "type": "function",
+    "function": {
+        "name": "query_spreadsheet",
+        "description": (
+            "Ambil data spreadsheet user untuk menjawab pertanyaan tentang nilai IKU kampus. "
+            "Panggil ini BILA PERTANYAAN menyebut 'kampus saya', 'data saya', atau butuh data internal "
+            "untuk menghitung nilai IKU. Jangan panggil untuk pertanyaan definisi/rumus IKU.\n"
+            "Mengembalikan kolom dan baris data dari spreadsheet user (max 200 baris)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filter_json": {
+                    "type": "string",
+                    "description": (
+                        "Filter data dalam bentuk JSON (opsional). Contoh: "
+                        '{"tahun": "2024", "fakultas": "Teknik"}. '
+                        "Kosongkan string kosong jika tidak perlu filter."
+                    ),
+                }
+            },
+            "required": [],
+        },
+    },
+}
+
+NAMA_ALAT_SPREADSHEET = TOOL_QUERY_SPREADSHEET["function"]["name"]
+
+
+def jalankan_spreadsheet_tool(filter_json: str = "{}") -> dict:
+    """
+    Jalankan query spreadsheet tool.
+    
+    Args:
+        filter_json: Filter dalam format JSON string (contoh: '{"tahun": "2024"}')
+    
+    Returns:
+        dict dengan keys: status, source, columns, rows, truncated, data_context
+    """
+    try:
+        # Ambil data user (untuk MVP, gunakan email dummy atau user context)
+        # Dalam production, ini akan menggunakan user_email dari auth context
+        # TODO: Ganti hardcoded email untuk production
+        user_email = "demo@kampus.example.com"  # placeholder
+        
+        result = get_spreadsheet_data_for_user(user_email)
+        
+        if result["status"] != "ok":
+            return result
+        
+        # Format konteks untuk LLM
+        context_text = format_spreadsheet_context(
+            rows=result["rows"],
+            columns=result["columns"],
+            max_rows=200
+        )
+        
+        return {
+            "status": "ok",
+            "source": result["source"],
+            "columns": result["columns"],
+            "rows": result["rows"],
+            "truncated": result.get("truncated", False),
+            "data_context": context_text,
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error mengambil spreadsheet: {type(e).__name__}: {e}",
+        }
 

@@ -23,5 +23,9 @@ chromadb>=1.5,<2
 # Generation (LLM: Gemini / Ollama / OpenAI lewat format OpenAI)
 openai>=1.0
 
+# FastAPI service (src/api/app.py)
+fastapi>=0.100
+uvicorn[standard]>=0.24
+
 # Demo UI (src/ui/app_streamlit.py)
 streamlit>=1.40

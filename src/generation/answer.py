@@ -1,14 +1,15 @@
 """
 answer.py
-Inti chatbot: retriever v2 -> LLM (+ alat hitung_iku) -> jawaban dengan sitasi halaman.
+Inti chatbot: retrieval RAG + spreadsheet tool -> LLM (+ alat hitung_iku) -> jawaban.
 
 Alur satu pertanyaan:
-1. Retriever mengambil 5 chunk terbaik.
-2. LLM menerima instruksi + konteks bernomor + pertanyaan, dan boleh memanggil hitung_iku.
-3. Selama LLM meminta alat, kode menjalankan kalkulator dan mengirim hasilnya kembali.
-   Bila LLM ternyata menghitung sendiri tanpa kalkulator, ia diminta mengulang sekali.
-4. Jawaban akhir dirapikan (postproses.py) lalu diperiksa: rujukan [n] diubah menjadi
-   sitasi halaman dari metadata, dan angka hasil kalkulator harus muncul di jawaban.
+1. Retriever mengambil 5 chunk terbaik (selalu dipanggil untuk konteks IKU).
+2. Intent detection: apakah butuh data spreadsheet?
+   - Ya -> panggil spreadsheet tool, format konteks spreadsheet untuk LLM
+   - Tidak -> skip spreadsheet tool
+3. LLM menerima instruksi + konteks (chunk + spreadsheet) + pertanyaan.
+4. Selama LLM meminta alat hitung_iku, kode jalankan kalkulator dan kirim hasilnya.
+5. Jawaban akhir dirapikan (postproses.py) lalu diperiksa.
 """
 
 import json
@@ -26,6 +27,7 @@ from llm_client import get_client  # noqa: E402
 from postproses import angka_muncul, rapikan_jawaban, tampak_menghitung_sendiri, varian_angka  # noqa: E402,F401
 from prompt import SYSTEM_PROMPT, build_user_message  # noqa: E402
 from tools import NAMA_ALAT, TOOL_HITUNG_IKU, jalankan_alat  # noqa: E402
+from tools import NAMA_ALAT_SPREADSHEET, TOOL_QUERY_SPREADSHEET, jalankan_spreadsheet_tool  # noqa: E402,F401
 
 MAX_PUTARAN_ALAT = 4
 MAX_ULANG_ALAT_DITOLAK = 2
@@ -43,6 +45,18 @@ PESAN_HITUNG_SENDIRI = (
     "berdasarkan hasil alat, tanpa LaTeX. Jika datanya belum lengkap atau pertanyaannya di luar cakupan, "
     "tulis ulang jawaban tanpa angka hasil hitunganmu sendiri."
 )
+
+
+def intent_butuh_spreadsheet(question: str) -> bool:
+    """Deteksi apakah pertanyaan butuh data spreadsheet (data kampus user)."""
+    question_lower = question.lower()
+    keywords = ["kampus saya", "data saya", "nilai iku", "capaian iku", "berapa iku"]
+    tahun_pattern = re.compile(r"\b(202[0-9]|203[0-9])\b")
+    
+    has_keyword = any(kw in question_lower for kw in keywords)
+    has_tahun = bool(tahun_pattern.search(question))
+    
+    return has_keyword and has_tahun
 
 
 def alat_ditolak_server(e: openai.BadRequestError) -> bool:
@@ -108,30 +122,41 @@ class Chatbot:
 
     def ask(self, question: str) -> dict:
         chunks = self.retriever.search(question)
+        butuh_spreadsheet = intent_butuh_spreadsheet(question)
+        
+        spreadsheet_data = None
+        spreadsheet_context = ""
+        if butuh_spreadsheet:
+            hasil = jalankan_spreadsheet_tool()
+            if hasil["status"] == "ok":
+                spreadsheet_data = hasil
+                spreadsheet_context = "\n\n" + hasil.get("data_context", "")
+        
+        konteks = build_user_message(question, chunks) + spreadsheet_context
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_message(question, chunks)},
+            {"role": "user", "content": konteks},
         ]
         hasil_alat, masalah_alat = [], []
 
-        message = self._putaran_alat(messages, hasil_alat, masalah_alat)
+        tools_available = [TOOL_HITUNG_IKU, TOOL_QUERY_SPREADSHEET] if butuh_spreadsheet else [TOOL_HITUNG_IKU]
+        message = self._putaran_alat(messages, hasil_alat, masalah_alat, tools_available)
         berhasil = any("error" not in h["hasil"] for h in hasil_alat)
         if message and not berhasil and tampak_menghitung_sendiri(question, message.content or ""):
-            # angka tanpa kalkulator tidak terverifikasi walaupun kebetulan benar: minta ulang sekali
             masalah_alat.append("LLM menghitung sendiri tanpa kalkulator; diminta mengulang dengan alat.")
             messages += [{"role": "assistant", "content": message.content or ""},
                          {"role": "user", "content": PESAN_HITUNG_SENDIRI}]
-            message = self._putaran_alat(messages, hasil_alat, masalah_alat)
+            message = self._putaran_alat(messages, hasil_alat, masalah_alat, tools_available)
 
         jawaban = rapikan_jawaban(message.content or "").strip() if message else \
             "Maaf, perhitungan tidak selesai dalam batas percobaan. Coba ulangi dengan data yang lebih lengkap."
         if not jawaban:
-            # jangan gagal diam-diam: user tetap mendapat pesan, dan kejadiannya tercatat
             jawaban = PESAN_JAWABAN_KOSONG
             masalah_alat.append(f"LLM tetap mengembalikan jawaban kosong setelah diulang {MAX_ULANG_KOSONG}x.")
         sitasi, peringatan = periksa_jawaban(question, jawaban, chunks, hasil_alat)
         peringatan = masalah_alat + peringatan
         sumber_rumus = sorted({h["hasil"]["sumber"] for h in hasil_alat if "sumber" in h["hasil"]})
+        
         return {
             "pertanyaan": question,
             "jawaban": jawaban,
@@ -140,21 +165,72 @@ class Chatbot:
             "kalkulator": hasil_alat,
             "peringatan": peringatan,
             "chunks": chunks,
+            "spreadsheet": spreadsheet_data,
+            "butuh_spreadsheet": butuh_spreadsheet,
         }
 
-    def _putaran_alat(self, messages: list[dict], hasil_alat: list[dict], masalah_alat: list[str]):
-        """Tanya LLM; selama ia meminta alat, jalankan kalkulator dan kirim hasilnya kembali.
-        Mengembalikan pesan jawaban akhir, atau None bila batas putaran habis."""
+    def ask_with_spreadsheet(self, question: str, spreadsheet_context: str) -> dict:
+        """
+        Jawab pertanyaan menggunakan RAG + spreadsheet_context yang sudah disediakan.
+        Dipakai untuk 'second call' dari Next.js setelah data spreadsheet diambil.
+
+        Args:
+            question: Pertanyaan user
+            spreadsheet_context: Teks konteks spreadsheet yang sudah diformat (dari Next.js)
+
+        Returns:
+            dict sama seperti ask()
+        """
+        chunks = self.retriever.search(question)
+        konteks = build_user_message(question, chunks) + "\n\n" + spreadsheet_context
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": konteks},
+        ]
+        hasil_alat, masalah_alat = [], []
+
+        # Sediakan kedua tool (kalkulasi IKU + spreadsheet) karena mungkin LLM butuh keduanya
+        tools_available = [TOOL_HITUNG_IKU, TOOL_QUERY_SPREADSHEET]
+        message = self._putaran_alat(messages, hasil_alat, masalah_alat, tools_available)
+
+        jawaban = rapikan_jawaban(message.content or "").strip() if message else \
+            "Maaf, tidak dapat memproses data spreadsheet. Coba ulangi pertanyaan."
+        if not jawaban:
+            jawaban = PESAN_JAWABAN_KOSONG
+
+        sitasi, peringatan = periksa_jawaban(question, jawaban, chunks, hasil_alat)
+        peringatan = masalah_alat + peringatan
+        sumber_rumus = sorted({h["hasil"]["sumber"] for h in hasil_alat if "sumber" in h["hasil"]})
+
+        return {
+            "pertanyaan": question,
+            "jawaban": jawaban,
+            "sitasi": sitasi,
+            "sumber_rumus": sumber_rumus,
+            "kalkulator": hasil_alat,
+            "peringatan": peringatan,
+            "chunks": chunks,
+            "spreadsheet": {"from_nextjs": True, "context_length": len(spreadsheet_context)},
+            "butuh_spreadsheet": True,
+        }
+
+
+    def _putaran_alat(self, messages: list[dict], hasil_alat: list[dict], masalah_alat: list[str], tools: list[dict]):
+        """Tanya LLM; selama ia meminta alat, jalankan kalkulator/spreadsheet dan kirim hasilnya kembali."""
         for _ in range(MAX_PUTARAN_ALAT):
-            response = self._minta_llm(messages, masalah_alat)
+            response = self._minta_llm(messages, masalah_alat, tools)
             message = response.choices[0].message
             if not message.tool_calls:
                 return message
-            # pesan asisten (berisi permintaan alat) dikirim balik APA ADANYA: Gemini menyisipkan
-            # data tambahan ("thought signature") yang wajib dikembalikan tanpa diubah
             messages.append(message.model_dump(exclude_none=True))
             for call in message.tool_calls:
-                if call.function.name != NAMA_ALAT:
+                if call.function.name == NAMA_ALAT_SPREADSHEET:
+                    hasil = jalankan_spreadsheet_tool(call.function.arguments or "{}")
+                    hasil_alat.append({"argumen": call.function.arguments, "hasil": hasil})
+                    messages.append({"role": "tool", "tool_call_id": call.id,
+                                    "content": json.dumps(hasil, ensure_ascii=False)})
+                elif call.function.name != NAMA_ALAT:
                     masalah_alat.append(f"LLM memakai nama alat tidak baku '{call.function.name}' (tetap diproses).")
                 hasil = jalankan_alat(call.function.name, call.function.arguments)
                 hasil_alat.append({"argumen": call.function.arguments, "hasil": hasil})
@@ -162,7 +238,7 @@ class Chatbot:
                                 "content": json.dumps(hasil, ensure_ascii=False)})
         return None
 
-    def _minta_llm(self, messages: list[dict], masalah_alat: list[str]):
+    def _minta_llm(self, messages: list[dict], masalah_alat: list[str], tools: list[dict]):
         """Panggil LLM, dengan dua percobaan ulang otomatis:
         - server menolak panggilan alat yang rusak (400): ulangi dengan catatan koreksi
           (catatan hanya dipakai untuk percobaan ulang, tidak masuk riwayat percakapan);
@@ -172,7 +248,7 @@ class Chatbot:
         while True:
             try:
                 response = self.client.chat.completions.create(
-                    model=self.model, messages=percobaan, tools=[TOOL_HITUNG_IKU], tool_choice="auto",
+                    model=self.model, messages=percobaan, tools=tools, tool_choice="auto",
                 )
             except openai.BadRequestError as e:
                 if not alat_ditolak_server(e) or ditolak == MAX_ULANG_ALAT_DITOLAK:
@@ -195,6 +271,8 @@ def tampilkan(hasil: dict) -> str:
         baris += ["Sumber:"] + [f"  {s}" for s in hasil["sitasi"]]
     if hasil["sumber_rumus"]:
         baris += ["Sumber rumus (kalkulator):"] + [f"  {s}" for s in hasil["sumber_rumus"]]
+    if hasil.get("spreadsheet"):
+        baris += [f"Data spreadsheet: {len(hasil['spreadsheet'].get('rows', []))} baris"]
     if hasil["peringatan"]:
         baris += ["", "PERINGATAN:"] + [f"  - {p}" for p in hasil["peringatan"]]
     return "\n".join(baris)
