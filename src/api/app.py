@@ -195,6 +195,8 @@ async def answer(
     q = question.get("question", "")
     scope = question.get("scope")
     spreadsheet_context = question.get("spreadsheet_context")  # optional: dari Next.js saat 2nd call
+    
+    logger.info(f"Spreadsheet context received: {len(spreadsheet_context) if spreadsheet_context else 0} chars")
 
     if not q:
         return JSONResponse(
