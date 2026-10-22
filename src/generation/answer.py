@@ -17,6 +17,7 @@ import re
 import sys
 from pathlib import Path
 import openai
+from spreadsheet_calc import precalculate_spreadsheet
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "retrieval"))
@@ -121,25 +122,24 @@ class Chatbot:
         self.client, self.model = get_client()
 
     def ask(self, question: str) -> dict:
+        """
+        Jawab pertanyaan menggunakan RAG + kalkulator IKU.
+
+        CATATAN: Metode ini HANYA dipanggil untuk intent "definisi" atau "formula"
+        (tidak butuh data spreadsheet). Untuk intent "data", app.py mengembalikan
+        action fetch_data ke Next.js yang akan memanggil ask_with_spreadsheet().
+        jalankan_spreadsheet_tool() dengan email dummy sudah dinonaktifkan.
+        """
         chunks = self.retriever.search(question)
-        butuh_spreadsheet = intent_butuh_spreadsheet(question)
-        
-        spreadsheet_data = None
-        spreadsheet_context = ""
-        if butuh_spreadsheet:
-            hasil = jalankan_spreadsheet_tool()
-            if hasil["status"] == "ok":
-                spreadsheet_data = hasil
-                spreadsheet_context = "\n\n" + hasil.get("data_context", "")
-        
-        konteks = build_user_message(question, chunks) + spreadsheet_context
+
+        konteks = build_user_message(question, chunks)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": konteks},
         ]
         hasil_alat, masalah_alat = [], []
 
-        tools_available = [TOOL_HITUNG_IKU, TOOL_QUERY_SPREADSHEET] if butuh_spreadsheet else [TOOL_HITUNG_IKU]
+        tools_available = [TOOL_HITUNG_IKU]
         message = self._putaran_alat(messages, hasil_alat, masalah_alat, tools_available)
         berhasil = any("error" not in h["hasil"] for h in hasil_alat)
         if message and not berhasil and tampak_menghitung_sendiri(question, message.content or ""):
@@ -156,7 +156,7 @@ class Chatbot:
         sitasi, peringatan = periksa_jawaban(question, jawaban, chunks, hasil_alat)
         peringatan = masalah_alat + peringatan
         sumber_rumus = sorted({h["hasil"]["sumber"] for h in hasil_alat if "sumber" in h["hasil"]})
-        
+
         return {
             "pertanyaan": question,
             "jawaban": jawaban,
@@ -165,34 +165,71 @@ class Chatbot:
             "kalkulator": hasil_alat,
             "peringatan": peringatan,
             "chunks": chunks,
-            "spreadsheet": spreadsheet_data,
-            "butuh_spreadsheet": butuh_spreadsheet,
+            "spreadsheet": None,
+            "butuh_spreadsheet": False,
         }
+
 
     def ask_with_spreadsheet(self, question: str, spreadsheet_context: str) -> dict:
         """
-        Jawab pertanyaan menggunakan RAG + spreadsheet_context yang sudah disediakan.
-        Dipakai untuk 'second call' dari Next.js setelah data spreadsheet diambil.
-
-        Args:
-            question: Pertanyaan user
-            spreadsheet_context: Teks konteks spreadsheet yang sudah diformat (dari Next.js)
-
-        Returns:
-            dict sama seperti ask()
+        Jawab pertanyaan menggunakan RAG + spreadsheet_context yang sudah dihitung
+        secara deterministik oleh spreadsheet_calc.py (1x panggilan LLM, bebas Error 400/413).
         """
-        chunks = self.retriever.search(question)
-        konteks = build_user_message(question, chunks) + "\n\n" + spreadsheet_context
+        # 1. Ambil 3 chunk dokumen terbaik untuk sitasi
+        chunks = self.retriever.search(question)[:3]
+
+        # 2. Pre-calculate semua baris & rekap menggunakan kalkulator resmi Python
+        enriched_context, hasil_alat = precalculate_spreadsheet(spreadsheet_context)
+
+        instruksi_data = (
+            f"{enriched_context}\n\n"
+            "INSTRUKSI PENJAWABAN DATA KAMPUS (PENTING):\n"
+            "- Seluruh angka Rekap, Pembilang, Penyebut, dan Tabel di atas SUDAH dihitung secara resmi oleh kalkulator server.\n"
+            "- JANGAN memanggil fungsi/alat/tool apa pun (termasuk hitung_iku, python, atau container.exec). Cukup baca dan tulis ulang rincian angka yang sudah tersedia di atas dalam bentuk teks biasa.\n"
+            "- Gunakan langsung angka dari bagian Rekap atau Tabel sesuai pertanyaan user.\n"
+            "- Sertakan sitasi [1], [2], [3] dari potongan dokumen ketika menjelaskan definisi, kriteria, atau rumus IKU."
+        )
+
+        konteks = build_user_message(question, chunks) + "\n\n" + instruksi_data
+
+        # Override instruksi tool di SYSTEM_PROMPT agar model tidak mencoba memanggil tool saat tool_choice=none
+        system_prompt_no_tool = (
+            SYSTEM_PROMPT
+            + "\n\nCATATAN MODE SPREADSHEET: Pada panggilan ini semua perhitungan telah selesai dijalankan di server. "
+            "DILARANG memanggil tool/function call apa pun. Jawab langsung dengan teks."
+        )
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt_no_tool},
             {"role": "user", "content": konteks},
         ]
-        hasil_alat, masalah_alat = [], []
 
-        # Sediakan kedua tool (kalkulasi IKU + spreadsheet) karena mungkin LLM butuh keduanya
-        tools_available = [TOOL_HITUNG_IKU, TOOL_QUERY_SPREADSHEET]
-        message = self._putaran_alat(messages, hasil_alat, masalah_alat, tools_available)
+        masalah_alat = []
+        message = None
+
+        # 3. Panggil LLM 1 kali (dengan penyelamatan otomatis jika Groq terkena tool_use_failed)
+        for percobaan_ke in range(MAX_ULANG_ALAT_DITOLAK + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.0,
+                )
+                message = response.choices[0].message
+                break
+            except openai.BadRequestError as e:
+                if not alat_ditolak_server(e):
+                    raise
+                masalah_alat.append(f"Groq menolak tool call pada mode non-tool (percobaan {percobaan_ke + 1}); diulang.")
+                if percobaan_ke < MAX_ULANG_ALAT_DITOLAK - 1:
+                    messages.append({
+                        "role": "system",
+                        "content": "PERINGATAN SISTEM: Jangan memanggil tool atau mengeksekusi kode apa pun! Tuliskan jawaban langsung dalam teks bahasa Indonesia berdasarkan data yang sudah dihitung di atas."
+                    })
+                else:
+                    # Fallback terakhir: jika model tetap memaksa panggil tool, berikan TOOL_HITUNG_IKU agar tidak crash 400
+                    message = self._putaran_alat(messages, hasil_alat, masalah_alat, [TOOL_HITUNG_IKU])
+                    break
 
         jawaban = rapikan_jawaban(message.content or "").strip() if message else \
             "Maaf, tidak dapat memproses data spreadsheet. Coba ulangi pertanyaan."
@@ -215,7 +252,6 @@ class Chatbot:
             "butuh_spreadsheet": True,
         }
 
-
     def _putaran_alat(self, messages: list[dict], hasil_alat: list[dict], masalah_alat: list[str], tools: list[dict]):
         """Tanya LLM; selama ia meminta alat, jalankan kalkulator/spreadsheet dan kirim hasilnya kembali."""
         for _ in range(MAX_PUTARAN_ALAT):
@@ -229,20 +265,19 @@ class Chatbot:
                     hasil = jalankan_spreadsheet_tool(call.function.arguments or "{}")
                     hasil_alat.append({"argumen": call.function.arguments, "hasil": hasil})
                     messages.append({"role": "tool", "tool_call_id": call.id,
-                                    "content": json.dumps(hasil, ensure_ascii=False)})
-                elif call.function.name != NAMA_ALAT:
-                    masalah_alat.append(f"LLM memakai nama alat tidak baku '{call.function.name}' (tetap diproses).")
-                hasil = jalankan_alat(call.function.name, call.function.arguments)
-                hasil_alat.append({"argumen": call.function.arguments, "hasil": hasil})
-                messages.append({"role": "tool", "tool_call_id": call.id,
-                                "content": json.dumps(hasil, ensure_ascii=False)})
+                                     "content": json.dumps(hasil, ensure_ascii=False)})
+                else:
+                    if call.function.name != NAMA_ALAT:
+                        masalah_alat.append(f"LLM memakai nama alat tidak baku '{call.function.name}' (tetap diproses).")
+                    hasil = jalankan_alat(call.function.name, call.function.arguments)
+                    hasil_alat.append({"argumen": call.function.arguments, "hasil": hasil})
+                    messages.append({"role": "tool", "tool_call_id": call.id,
+                                     "content": json.dumps(hasil, ensure_ascii=False)})
         return None
 
     def _minta_llm(self, messages: list[dict], masalah_alat: list[str], tools: list[dict]):
-        """Panggil LLM, dengan dua percobaan ulang otomatis:
-        - server menolak panggilan alat yang rusak (400): ulangi dengan catatan koreksi
-          (catatan hanya dipakai untuk percobaan ulang, tidak masuk riwayat percakapan);
-        - LLM mengembalikan respons kosong (tanpa teks dan tanpa panggilan alat): ulangi apa adanya."""
+        """Panggil LLM, dengan penyelamatan otomatis jika Groq menolak nama alat (mis. 'hitungan_iku')
+        atau percobaan ulang bila format JSON rusak / respons kosong."""
         percobaan = messages
         ditolak = kosong = 0
         while True:
@@ -256,7 +291,8 @@ class Chatbot:
                 ditolak += 1
                 alasan = ringkas_alasan(e)
                 masalah_alat.append(f"Panggilan alat ditolak server ({alasan}); diulang otomatis.")
-                percobaan = messages + [{"role": "user", "content": PESAN_ALAT_DITOLAK.format(alasan=alasan)}]
+                # Gunakan role system atau gabungkan ke pesan terakhir agar tidak ada 2 role 'user' berurutan
+                percobaan = messages + [{"role": "system", "content": PESAN_ALAT_DITOLAK.format(alasan=alasan)}]
                 continue
             message = response.choices[0].message
             if message.tool_calls or (message.content or "").strip() or kosong == MAX_ULANG_KOSONG:

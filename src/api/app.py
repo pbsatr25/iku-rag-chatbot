@@ -63,34 +63,54 @@ def detect_intent(question: str) -> str:
     """
     Detect intent pertanyaan dengan keyword-based pattern matching.
     Returns: "definisi", "formula", atau "data"
-    
+
     Priority:
-    1. "data" - jika menyebut "saya", "kampus saya", "pt saya", "data kampus/saya"
+    1. "data" - jika menyebut data kampus (dengan/tanpa kata "saya"),
+                atau menanyakan nilai/angka/capaian/realisasi/target IKU
     2. "formula" - jika tanya "rumus", "cara hitung"
     3. "definisi" - default (tanya konsep/penjelasan IKU)
+
+    CATATAN: Semua intent "data" akan di-return sebagai fetch_data ke Next.js.
+    Next.js yang mengambil spreadsheet user dari DB dan mengirim konteks ke sini.
+    jalankan_spreadsheet_tool() dengan email dummy TIDAK dipakai lagi.
     """
     q_lower = question.lower()
-    
-    # Intent: DATA - deteksi kata "saya" yang merujuk ke data kampus user
-    # Pattern: "IKU X saya", "kampus saya", "nilai saya", "data saya", "capaian saya"
-    data_patterns = [
-        r"\biku\s+\d+\s+saya\b",           # "IKU 1 saya", "IKU 3 saya"
+
+    # Intent: DATA
+    # Grup A: eksplisit menyebut kepemilikan user ("saya", "kampus saya", dll)
+    data_patterns_personal = [
+        r"\biku\s+\d+\s+saya\b",             # "IKU 1 saya"
         r"\bnilai\s+(iku\s+\d+\s+)?saya\b",  # "nilai IKU 1 saya", "nilai saya"
         r"\bkampus\s+saya\b",
         r"\bpt\s+saya\b",
         r"\bdata\s+(kampus|saya|kami)\b",
         r"\bcapaian\s+(iku\s+\d+\s+)?saya\b",
-        r"\bberapa\s+(nilai\s+)?iku\s+\d+\s+saya\b",  # "berapa IKU 1 saya", "berapa nilai IKU 3 saya"
+        r"\bberapa\s+(nilai\s+)?iku\s+\d+\s+saya\b",
+        r"\buniversitas\s+saya\b",
+        r"\binstitusi\s+saya\b",
     ]
-    
-    if any(re.search(pattern, q_lower) for pattern in data_patterns):
+
+    # Grup B: menanyakan nilai/angka/capaian IKU tanpa kata "saya"
+    # (pertanyaan yang memerlukan data spreadsheet, bukan definisi/rumus)
+    data_patterns_numeric = [
+        r"\b(berapa|tampilkan|lihat|tunjukkan|cek|periksa)\b.{0,40}\biku\s*\d+\b",
+        r"\biku\s*\d+\b.{0,40}\b(berapa|nilai|angka|capaian|skor|persentase|realisasi|target)\b",
+        r"\b(nilai|capaian|skor|realisasi|target|persentase)\b.{0,40}\biku\s*\d+\b",
+        r"\bdata\b.{0,30}\biku\s*\d+\b",
+        r"\b(berapa|nilai|capaian)\s+(iku\s+\d+|mahasiswa|lulusan|dosen|prodi|fakultas)\b",
+    ]
+
+    if any(re.search(p, q_lower) for p in data_patterns_personal):
         return "data"
-    
+
+    if any(re.search(p, q_lower) for p in data_patterns_numeric):
+        return "data"
+
     # Intent: FORMULA
     formula_keywords = ["rumus", "formula", "cara hitung", "cara menghitung", "bagaimana menghitung"]
     if any(kw in q_lower for kw in formula_keywords):
         return "formula"
-    
+
     # Intent: DEFINISI (default)
     return "definisi"
 
@@ -98,14 +118,13 @@ def detect_intent(question: str) -> str:
 
 
 
-def format_response(hasil: dict, intent: str) -> dict:
+
+def format_response(hasil: dict, intent: str, include_citations: bool = True) -> dict:
     """
     Format response dari Chatbot.ask() ke format RAGResponse.
-    - Jika intent == "data": return response tanpa sitasi (data dari spreadsheet)
-    - Jika intent != "data": return response dengan sitasi
     """
     citations = []
-    if intent != "data" and hasil.get("sitasi"):
+    if include_citations and hasil.get("sitasi"):
         for sitasi in hasil.get("sitasi", []):
             match = re.search(
                 r"\[(\d+)\]\s*(.+?),\s*hlm\.\s*(\d+)(?:–(\d+))?\s*(?:\((.+)\))?",
@@ -133,7 +152,7 @@ def format_response(hasil: dict, intent: str) -> dict:
         "citations": citations,
         "grounded": grounded,
         "outOfScope": None,
-        "action": None if intent != "data" else {"type": "fetch_data"},
+        "action": None if intent != "data" and not hasil.get("chunks") else None,
     }
 
 
@@ -211,8 +230,9 @@ async def answer(
         # Jika sudah ada spreadsheet_context (second call dari Next.js), langsung proses dengan RAG
         if spreadsheet_context:
             hasil = chatbot.ask_with_spreadsheet(q, spreadsheet_context)
-            response = format_response(hasil, "data")
-            response["action"] = None  # Sudah diproses, tidak perlu fetch lagi
+            # Izinkan format_response memproses sitasi yang ditemukan dari RAG chunks
+            response = format_response(hasil, "data", include_citations=True)
+            response["action"] = None  
             return response
 
         intent = detect_intent(q)
