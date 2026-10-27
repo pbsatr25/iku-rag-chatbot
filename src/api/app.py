@@ -9,6 +9,7 @@ Endpoint:
 import os
 import re
 import sys
+import json
 import logging
 from pathlib import Path
 
@@ -119,6 +120,191 @@ def detect_intent(question: str) -> str:
 
 
 
+def clean_formula_lines(text: str) -> list[str]:
+    r"""
+    Membersihkan teks rumus mentah dari chunk dokumen:
+    - Menghapus pembatas tabel pipa (| Formula | ... |)
+    - Mengonversi \frac{A}{B} -> (A) / (B)
+    - Menghapus \(, \), \[, \], $, \text{...}, dsb.
+    - Menghapus teks contoh angka atau tabel perhitungan manual
+    - Memisahkan sub-formula berurutan (misal: a. ... b. ...)
+    """
+    s = text.strip()
+    s = re.sub(r"^\|\s*(?:formula)?\s*\|\s*", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^\|\s*", "", s)
+    s = re.sub(r"\s*\|\s*$", "", s)
+
+    # Abaikan baris header tabel atau metadata
+    if s.lower().startswith("satuan") or s.startswith("---") or not s:
+        return []
+
+    # Konversi \frac{A}{B} -> (A) / (B)
+    while r"\frac" in s:
+        match = re.search(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", s)
+        if not match:
+            break
+        num, denom = match.group(1).strip(), match.group(2).strip()
+        s = s[:match.start()] + f"({num}) / ({denom})" + s[match.end():]
+
+    # Bersihkan LaTeX formatting
+    s = re.sub(r"\\text\{([^{}]+)\}", r"\1", s)
+    s = s.replace(r"\(", "").replace(r"\)", "").replace(r"\[", "").replace(r"\]", "").replace("$", "")
+    s = s.replace(r"\ ", " ")
+    s = re.sub(r"\\sum(?:_\{[^}]*\})?(?:\^\{[^}]*\})?", "Σ", s)
+
+    # Pisahkan sebelum 'Contoh Perhitungan' agar tidak membawa tabel angka contoh
+    if "contoh perhitungan" in s.lower():
+        idx = s.lower().find("contoh perhitungan")
+        s = s[:idx].strip()
+
+    # Potong jika ada 'Dimana:' di akhir
+    if "dimana:" in s.lower():
+        idx = s.lower().find("dimana:")
+        s = s[:idx].strip()
+
+    # Pisahkan jika ada sub-formula berurutan (misal: a. ... b. ... c. ...)
+    parts = re.split(r"\s+(?=[a-d]\.\s+)", s)
+    res = []
+    for p in parts:
+        p_clean = re.sub(r"[ \t]+", " ", p).strip()
+        # Abaikan baris contoh / nilai diketahui
+        if any(k in p_clean.lower() for k in ["realisasi =", "diketahui"]):
+            continue
+        if p_clean and any(sym in p_clean for sym in ["=", "÷", "×", "x", "%", "/", "+", "Σ"]):
+            res.append(p_clean)
+    return res
+
+
+def extract_blocks(hasil: dict) -> list[dict] | None:
+    """
+    Ekstrak field blocks: Array<{ type: 'formula' | 'note' | 'metric', lines: string[] }>
+    secara deterministik dari kalkulator resmi dan metadata dokumen.
+    """
+    blocks = []
+
+    # 1. METRIC: Ekstrak ringkasan utama dari hasil kalkulator
+    metric_lines = []
+    seen_metrics = set()
+    kalkulator = hasil.get("kalkulator") or []
+    for item in kalkulator:
+        hasil_dict = item.get("hasil")
+        if not isinstance(hasil_dict, dict) or "error" in hasil_dict:
+            continue
+
+        argumen = item.get("argumen", {})
+        if isinstance(argumen, str):
+            try:
+                argumen = json.loads(argumen)
+            except Exception:
+                argumen = {}
+
+        thn = argumen.get("tahun")
+        fak = argumen.get("fakultas")
+        jnj = argumen.get("jenjang")
+
+        nilai = hasil_dict.get("hasil")
+        if nilai is None:
+            nilai = hasil_dict.get("aee_pt")
+
+        satuan = hasil_dict.get("satuan", "")
+        if satuan:
+            satuan = f" {satuan}".replace(" %", "%")
+
+        if nilai is not None:
+            if thn and not fak and not jnj:
+                line = f"Capaian Agregat Kampus ({thn}): {nilai}{satuan}"
+            elif fak and thn:
+                line = f"Fakultas {fak} ({thn}): {nilai}{satuan}"
+            elif jnj and thn:
+                line = f"Jenjang {jnj} ({thn}): {nilai}{satuan}"
+            elif thn:
+                line = f"Tahun {thn}: {nilai}{satuan}"
+            else:
+                fungsi = argumen.get("fungsi", "Kalkulasi")
+                line = f"{fungsi}: {nilai}{satuan}"
+
+            if line not in seen_metrics:
+                seen_metrics.add(line)
+                metric_lines.append(line)
+
+    if metric_lines:
+        blocks.append({
+            "type": "metric",
+            "lines": metric_lines[:15],
+        })
+
+    # 2. FORMULA: Ekstrak baris rumus
+    formula_lines = []
+    seen_formulas = set()
+
+    # Prioritas 1: Dari kalkulator resmi (calc.RUMUS) jika tersedia
+    for item in kalkulator:
+        argumen = item.get("argumen", {})
+        if isinstance(argumen, str):
+            try:
+                argumen = json.loads(argumen)
+            except Exception:
+                argumen = {}
+        fungsi = argumen.get("fungsi")
+        if fungsi and hasattr(calc, "RUMUS") and fungsi in calc.RUMUS:
+            for ft in calc.RUMUS[fungsi].get("formula_teks", []):
+                cleaned = str(ft).strip()
+                if cleaned and cleaned not in seen_formulas:
+                    seen_formulas.add(cleaned)
+                    formula_lines.append(cleaned)
+
+    # Prioritas 2: HANYA jika calc.RUMUS belum menghasilkan formula, ekstrak & bersihkan dari chunks
+    if not formula_lines:
+        chunks = hasil.get("chunks") or []
+        for c in chunks:
+            bagian = str(c.get("bagian") or "").lower()
+            if "formula" in bagian or c.get("sectionType") == "formula":
+                content = c.get("content", "")
+                for raw_line in content.splitlines():
+                    for cleaned_line in clean_formula_lines(raw_line):
+                        if cleaned_line not in seen_formulas:
+                            seen_formulas.add(cleaned_line)
+                            formula_lines.append(cleaned_line)
+
+    # Prioritas 3: Fallback ke sumber_rumus jika masih kosong
+    if not formula_lines and hasil.get("sumber_rumus"):
+        for sr in hasil.get("sumber_rumus", []):
+            sr_str = str(sr).strip()
+            if sr_str and sr_str not in seen_formulas:
+                seen_formulas.add(sr_str)
+                formula_lines.append(sr_str)
+
+    if formula_lines:
+        blocks.append({
+            "type": "formula",
+            "lines": formula_lines[:10],
+        })
+
+    # 3. NOTE: Ekstrak catatan sumber atau catatan tafsir
+    note_lines = []
+    seen_notes = set()
+    chunks = hasil.get("chunks") or []
+    for c in chunks:
+        for sn in c.get("source_notes", []):
+            note_text = sn.get("note", "").strip() if isinstance(sn, dict) else str(sn).strip()
+            if note_text and note_text not in seen_notes:
+                seen_notes.add(note_text)
+                note_lines.append(note_text)
+
+        catatan = c.get("catatan")
+        if catatan and str(catatan).strip() not in seen_notes:
+            seen_notes.add(str(catatan).strip())
+            note_lines.append(str(catatan).strip())
+
+    if note_lines:
+        blocks.append({
+            "type": "note",
+            "lines": note_lines[:10],
+        })
+
+    return blocks if blocks else None
+
+
 def format_response(hasil: dict, intent: str, include_citations: bool = True) -> dict:
     """
     Format response dari Chatbot.ask() ke format RAGResponse.
@@ -146,13 +332,15 @@ def format_response(hasil: dict, intent: str, include_citations: bool = True) ->
                 })
 
     grounded = len(citations) > 0
+    blocks = extract_blocks(hasil)
 
     return {
         "answer": hasil.get("jawaban", ""),
         "citations": citations,
+        "blocks": blocks,
         "grounded": grounded,
         "outOfScope": None,
-        "action": None if intent != "data" and not hasil.get("chunks") else None,
+        "action": None,
     }
 
 
@@ -244,6 +432,7 @@ async def answer(
             response = {
                 "answer": "Memproses permintaan data kampus Anda...",
                 "citations": [],
+                "blocks": None,
                 "grounded": True,
                 "outOfScope": None,
                 "action": {
