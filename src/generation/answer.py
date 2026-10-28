@@ -27,6 +27,7 @@ from retriever import Retriever  # noqa: E402
 from llm_client import get_client  # noqa: E402
 from postproses import angka_muncul, rapikan_jawaban, tampak_menghitung_sendiri, varian_angka  # noqa: E402,F401
 from prompt import SYSTEM_PROMPT, build_user_message  # noqa: E402
+from cakupan import Cakupan, chunk_boleh, instruksi_cakupan  # noqa: E402
 from tools import NAMA_ALAT, TOOL_HITUNG_IKU, jalankan_alat  # noqa: E402
 from tools import NAMA_ALAT_SPREADSHEET, TOOL_QUERY_SPREADSHEET, jalankan_spreadsheet_tool  # noqa: E402,F401
 
@@ -121,7 +122,19 @@ class Chatbot:
         self.retriever = Retriever.v2(top_k=top_k)
         self.client, self.model = get_client()
 
-    def ask(self, question: str) -> dict:
+    def _cari(self, question: str, cakupan: Cakupan | None) -> list[dict]:
+        """Retrieval yang dibatasi cakupan halaman (tanpa cakupan = seluruh dokumen)."""
+        if cakupan is None:
+            return self.retriever.search(question)
+        return self.retriever.search(question, boleh=lambda meta: chunk_boleh(meta, cakupan),
+                                     iku_cakupan=cakupan.iku_id)
+
+    @staticmethod
+    def _system_prompt(dasar: str, cakupan: Cakupan | None) -> str:
+        tambahan = instruksi_cakupan(cakupan)
+        return f"{dasar}\n\n{tambahan}" if tambahan else dasar
+
+    def ask(self, question: str, cakupan: Cakupan | None = None) -> dict:
         """
         Jawab pertanyaan menggunakan RAG + kalkulator IKU.
 
@@ -129,12 +142,14 @@ class Chatbot:
         (tidak butuh data spreadsheet). Untuk intent "data", app.py mengembalikan
         action fetch_data ke Next.js yang akan memanggil ask_with_spreadsheet().
         jalankan_spreadsheet_tool() dengan email dummy sudah dinonaktifkan.
+
+        `cakupan` = halaman dasbor aktif; None untuk CLI dan evaluasi (tanpa batas cakupan).
         """
-        chunks = self.retriever.search(question)
+        chunks = self._cari(question, cakupan)
 
         konteks = build_user_message(question, chunks)
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt(SYSTEM_PROMPT, cakupan)},
             {"role": "user", "content": konteks},
         ]
         hasil_alat, masalah_alat = [], []
@@ -170,13 +185,14 @@ class Chatbot:
         }
 
 
-    def ask_with_spreadsheet(self, question: str, spreadsheet_context: str) -> dict:
+    def ask_with_spreadsheet(self, question: str, spreadsheet_context: str,
+                             cakupan: Cakupan | None = None) -> dict:
         """
         Jawab pertanyaan menggunakan RAG + spreadsheet_context yang sudah dihitung
         secara deterministik oleh spreadsheet_calc.py (1x panggilan LLM, bebas Error 400/413).
         """
         # 1. Ambil 3 chunk dokumen terbaik untuk sitasi
-        chunks = self.retriever.search(question)[:3]
+        chunks = self._cari(question, cakupan)[:3]
 
         # 2. Pre-calculate semua baris & rekap menggunakan kalkulator resmi Python
         enriched_context, hasil_alat = precalculate_spreadsheet(spreadsheet_context)
@@ -200,7 +216,7 @@ class Chatbot:
         )
 
         messages = [
-            {"role": "system", "content": system_prompt_no_tool},
+            {"role": "system", "content": self._system_prompt(system_prompt_no_tool, cakupan)},
             {"role": "user", "content": konteks},
         ]
 
