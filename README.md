@@ -43,29 +43,52 @@ Sumber pengetahuan:
 | 3. Chunking berbasis struktur (bge-m3, ≤ 512 token) | ✅ Selesai | `src/chunking/chunk_structured.py` |
 | 4. Embedding `BAAI/bge-m3` | ✅ Selesai | `src/embedding/embed_chunks.py` |
 | 5. Vector DB ChromaDB (cosine) | ✅ Selesai | `src/vectordb/build_chroma.py` |
-| 6. Retrieval hybrid (dense + BM25 + RRF, IKU boost, dedupe) | ✅ Selesai | `src/retrieval/retriever.py` |
-| 6b. Kalkulator rumus IKU (*formula registry*) | ✅ Selesai | `src/calculator/iku_formulas.py` |
-| 7. LLM + tool calling kalkulator + sitasi (generation) | 🟡 Dalam pengerjaan: chatbot terminal & evaluasi jawaban otomatis tersedia; baseline penuh 44 soal menyusul | `src/generation/chat_cli.py`, `src/evaluation/run_answer_tests.py` |
-| 8. Antarmuka (API / UI chat) | ⬜ Belum. Rancangan integrasi ke backend dasbor: [docs/02-desain/integrasi_backend.md](docs/02-desain/integrasi_backend.md) | – |
+| 6. Retrieval hybrid (dense + BM25 + RRF, IKU boost, dedupe, sambung tabel) | ✅ Selesai | `src/retrieval/retriever.py`, `src/retrieval/sambung_tabel.py` |
+| 6b. Kalkulator rumus IKU (*formula registry*, pembacaan nominal uang) | ✅ Selesai | `src/calculator/iku_formulas.py` |
+| 7. LLM + tool calling kalkulator + sitasi + pemeriksaan jawaban (generation) | ✅ Selesai, lulus **42/44** soal uji | `src/generation/answer.py`, `src/generation/chat_cli.py` |
+| 7b. Evaluasi jawaban otomatis (44 soal) | ✅ Selesai | `src/evaluation/run_answer_tests.py` |
+| 8. Layanan HTTP (FastAPI) untuk backend | ⬜ Belum. Rancangan: [docs/02-desain/integrasi_backend.md](docs/02-desain/integrasi_backend.md) | – |
+| 9. Antarmuka chat di dasbor | ⬜ Belum (repo FE masih memakai data mock). Demo sementara: Streamlit, lihat [Demo web](#demo-web-untuk-dicoba-orang-lain-streamlit--tunnel) | `src/ui/app_streamlit.py` |
 
-**Hasil evaluasi retrieval & kalkulator terakhir** (test set 30 soal pertama, koleksi `pmpt_qa_v2`, 605 chunk). Laporan lengkap ada di [reports/evaluation/](reports/evaluation/).
+### Hasil evaluasi terakhir
 
-**Evaluasi jawaban LLM (awal):** 14 soal ketahanan (typo, bahasa santai, format uang tidak baku) dengan Groq `openai/gpt-oss-120b`: **12/14 lulus**. Satu gagal karena nama alat terpotong (sudah ditangani dengan percobaan ulang otomatis) dan satu karena LLM mengarang kepanjangan istilah AEE (perbaikan prompt menyusul). Baseline penuh 44 soal menyusul.
+Model `openai/gpt-oss-120b` (Groq, paket gratis), koleksi `pmpt_qa_v2` (605 chunk), test set 44 soal. Laporan lengkap, penjelasan tiap metrik, dan hasil per soal: **[docs/03-evaluasi/laporan_evaluasi_akhir.md](docs/03-evaluasi/laporan_evaluasi_akhir.md)**. Data mentah ada di [reports/evaluation/](reports/evaluation/).
 
-| Metrik | Baseline v1 | Sekarang (v2) |
-|---|---|---|
-| Hit@1 | 15/29 (51,7%) | **22/29 (75,9%)** |
-| Hit@5 | 25/29 (86,2%) | **26/29 (89,7%)** |
-| MRR@5 | 0,649 | **0,822** |
-| Halaman sitasi benar | 15/23 (65%) | **25/26 (96,2%)** |
-| Soal hitungan: hasil benar | – | **18/18** |
-| Soal hitungan: halaman sitasi benar | – | **17/18** |
+**Jawaban chatbot (44 soal):**
+
+| Metrik | Hasil |
+|---|---|
+| Lulus semua pemeriksaan otomatis | **42/44** |
+| Kalkulator dipanggil (30 soal hitungan) | 30/30 |
+| Hasil kalkulator = kunci | 30/30 |
+| Halaman sitasi benar | hitungan 30/30; definisi 12/13 |
+| Fakta kunci soal definisi | 10/12 |
+
+Perkembangan jumlah soal lulus: 20/36 (8 Okt) → 36/44 (9 Okt) → 41/44 (10 Okt) → **42/44** (11 Okt, setelah bug nominal uang H28 diperbaiki). Dua soal belum lulus: **D03** (rujukan AI kadang berbentuk `[*1*]` sehingga sitasi tidak muncul) dan **D06** (syarat pendampingan dosen tidak disebut).
+
+**Pencarian dokumen (43 soal dalam cakupan, retriever v2):**
+
+| Metrik | Hasil |
+|---|---|
+| Hit@1 | 30/43 (69,8%) |
+| Hit@3 | 39/43 (90,7%) |
+| **Hit@5** | **41/43 (95,3%)** |
+| MRR@5 | 0,806 |
+| Hit@5 gabungan (bukti tersebar di beberapa chunk) | 42/43 (97,7%) |
+| Halaman sitasi benar | 40/41 (97,6%) |
+| Rata-rata waktu per query | 0,06 detik |
+
+> [!NOTE]
+> - **Soal uji belum independen.** Ke-44 soal sudah dipakai untuk menyetel sistem, jadi skor di atas cenderung lebih tinggi daripada performa nyata. Perlu 10–15 soal baru dari pengguna nyata (demo Streamlit mengumpulkan pertanyaan untuk ini).
+> - **Reranker `bge-reranker-v2-m3` diuji dan tidak dipakai:** Hit@5 turun 41 → 40 dan waktu naik 0,05 → 15,7 detik per query.
+> - **Belum tercakup:** 12 rumus sub-indikator IKU, pembatasan jawaban per halaman dasbor, dan ingatan percakapan (lihat [panduan integrasi](docs/02-desain/integrasi_backend.md)).
+> - Hasil di atas memakai model gratis yang tidak selalu stabil (nama alat salah ketik, respons kosong, kadang LaTeX); semuanya ditangani dengan percobaan ulang dan perapian otomatis, tetapi perlu diuji ulang saat model diganti.
 
 ## Untuk tim Backend
 
 Ringkasan untuk tim Backend dasbor Monev IKU (Next.js + Prisma). Detail lengkap, contoh JSON, dan alasannya ada di **[panduan integrasi backend](docs/02-desain/integrasi_backend.md)**.
 
-**Kondisi sekarang:** inti chatbot (retrieval, kalkulator rumus, LLM + sitasi) sudah jalan dan teruji di terminal. **Layanan HTTP-nya belum ada**; UI chat di repo FE masih memakai data mock.
+**Kondisi sekarang:** inti chatbot (retrieval, kalkulator rumus, LLM + sitasi) sudah jalan dan lulus 42 dari 44 soal uji (lihat [hasil evaluasi](#hasil-evaluasi-terakhir)). **Layanan HTTP-nya belum ada**; UI chat di repo FE masih memakai data mock. Titik sambung yang akan dibungkus FastAPI adalah `Chatbot().ask(question)` di [`src/generation/answer.py`](src/generation/answer.py), yang mengembalikan jawaban, sitasi, hasil kalkulator, dan peringatan.
 
 **Arsitektur yang diusulkan:**
 
@@ -97,7 +120,7 @@ Selama layanan RAG belum siap, `/api/chat` bisa dibangun dengan **stub** yang me
 
 | Hal | Artinya untuk BE |
 |---|---|
-| Kuota free tier kecil (Groq ±8.000 token/menit untuk satu akun; satu soal hitungan ±8.000–10.000 token) | Hanya cukup untuk demo satu pengguna; perlu rate limit global dan pesan 429 yang jelas |
+| Kuota free tier kecil (Groq ±8.000 token/menit dan 200.000 token/hari per akun; satu soal ±7.000–10.000 token, jadi ±28 soal/hari) | Hanya cukup untuk demo satu pengguna; perlu rate limit global dan pesan 429 yang jelas. Untuk dipakai lebih luas perlu model berbayar |
 | Layanan RAG memuat model `bge-m3` (±1,5 GB RAM) | Harus proses yang selalu hidup (container/VM), **bukan** serverless |
 | Data free tier dapat dipakai penyedia LLM | Jangan kirim data internal kampus (isi spreadsheet, nama, NIM) |
 | Rumus IKU dibutuhkan juga di dasbor | Pakai [`src/calculator/spec/buku_iku_v1.json`](src/calculator/spec/buku_iku_v1.json) + kasus uji [`test_inputs_hitung.json`](data/evaluation/test_inputs_hitung.json), jangan salin bobot manual |
@@ -121,13 +144,17 @@ data/embeddings/embeddings.npy + metadata.jsonl
    │  [5] build_chroma.py
    ▼
 data/vectorstore/  (ChromaDB, koleksi pmpt_qa_v2)
-   │  [6] retriever.py          dense + BM25 + RRF → IKU boost → dedupe → (rerank)
+   │  [6] retriever.py          dense + BM25 + RRF → IKU boost → dedupe → sambung tabel
+   │                            (reranker tersedia tetapi tidak dipakai: hasilnya tidak lebih baik dan lambat)
    ▼
 top-k chunk (bernomor [1]..[5]) ──► [7] answer.py  LLM (Groq/Gemini/Ollama/OpenAI lewat format OpenAI)
                                          │  ▲
                         alat hitung_iku  │  │  hasil + langkah + sumber halaman rumus
                                          ▼  │
                                [6b] iku_formulas.py   rumus dihitung deterministik, bukan oleh LLM
+                                         │
+                                         ▼
+                      postproses.py: rapikan jawaban (LaTeX, rujukan), periksa angka vs kalkulator
                                          │
                                          ▼
                  jawaban + sitasi halaman (dari metadata chunk, bukan ditulis LLM) + PERINGATAN
@@ -151,18 +178,22 @@ iku-rag-chatbot/
 │   ├── embeddings/               # [4] vektor bge-m3 + metadata
 │   ├── vectorstore/              # [5] ChromaDB (di-generate, tidak di-commit)
 │   ├── metadata/                 # catatan cacat dokumen sumber (known_source_issues.json)
-│   ├── evaluation/               # test set: 44 soal + input soal hitungan
+│   ├── evaluation/               # test set: 44 soal, input soal hitungan, fakta kunci soal definisi
+│   ├── feedback/                 # log demo Streamlit (tidak di-commit)
 │   └── legacy/v1/                # artefak pipeline v1 (baseline pembanding)
 ├── docs/                         # dokumentasi per fase SDLC, lihat docs/README.md
 │   ├── 01-analisis/
-│   └── 02-desain/
+│   ├── 02-desain/
+│   └── 03-evaluasi/              # laporan evaluasi akhir chatbot (md, docx, pdf)
 ├── reports/
 │   ├── validation/               # output script validasi
-│   └── evaluation/               # laporan eval retrieval & uji hitungan (bertanggal)
+│   └── evaluation/               # laporan eval retrieval, uji hitungan, dan uji jawaban (bertanggal)
 ├── src/                          # satu folder = satu tahap pipeline
 │   ├── parsing/  processing/  chunking/  embedding/
 │   ├── vectordb/ retrieval/   calculator/ evaluation/
-│   ├── generation/               # [7] chatbot: klien LLM, alat hitung_iku, prompt, chat_cli.py
+│   ├── generation/               # [7] chatbot: answer.py (retrieval ↔ LLM), llm_client, tools (hitung_iku),
+│   │                             #     prompt, postproses, chat_cli.py
+│   ├── ui/                       # demo web Streamlit
 │   └── legacy/                   # script v1 yang sudah tidak dipakai
 ├── tests/                        # unit test (pytest), tanpa GPU
 ├── .env.example
@@ -273,11 +304,11 @@ pytest
 python src/retrieval/test_retrieval.py
 #    Pertanyaan: Bagaimana rumus IKU 3?
 
-# c. Evaluasi retrieval lengkap → angkanya harus sama dengan tabel di "Status proyek"
+# c. Evaluasi retrieval lengkap → angkanya harus sama dengan tabel di "Hasil evaluasi terakhir"
 python src/evaluation/eval_retrieval.py
 ```
 
-Setup selesai bila `pytest` lulus dan `eval_retrieval.py` menghasilkan Hit@1 22/29 serta MRR@5 0,822.
+Setup selesai bila semua tes `pytest` lulus dan `eval_retrieval.py` menghasilkan Hit@1 30/43, Hit@5 41/43, serta MRR@5 0,806.
 
 ## Menjalankan chatbot
 
@@ -404,18 +435,39 @@ python src/chunking/show_chunks.py --cari "NUPTK" --maks 3
 | Evaluasi retrieval | `python src/evaluation/eval_retrieval.py` | bge-m3 | Setelah chunking / embedding / retriever berubah |
 | Uji soal hitungan + sitasi | `python src/evaluation/run_calc_tests.py` | bge-m3 | Setelah kalkulator / retriever berubah |
 | Uji chatbot manual | `python src/generation/chat_cli.py --detail` + [contoh pertanyaan](#contoh-pertanyaan-untuk-mencoba) | bge-m3 + API key LLM | Setelah prompt / alat / model LLM berubah |
-| Evaluasi jawaban LLM otomatis | *menyusul* | – | – |
+| Evaluasi jawaban LLM otomatis (44 soal) | `python src/evaluation/run_answer_tests.py` | bge-m3 + API key LLM | Setelah prompt / alat / postproses / model / data berubah |
 
 Variasi evaluasi:
 
 ```powershell
 python src/evaluation/eval_retrieval.py --rerank            # + reranker (unduh ±2,3 GB sekali)
+python src/evaluation/eval_retrieval.py --no-sambung-tabel  # tanpa penyambungan tabel, untuk perbandingan
 python src/evaluation/run_calc_tests.py --id H07            # satu soal saja
 
 # Baseline v1, untuk perbandingan (bangun koleksinya dulu)
 python src/vectordb/build_chroma.py --embeddings-dir data/legacy/v1/embeddings --collection pmpt_qa --reset
 python src/evaluation/eval_retrieval.py --preset lama --collection pmpt_qa --metadata data/legacy/v1/embeddings/metadata.jsonl --oos-threshold 0.9
 ```
+
+### Evaluasi jawaban LLM (44 soal)
+
+`run_answer_tests.py` menjalankan soal ke chatbot sungguhan (retriever + LLM + kalkulator), lalu memeriksa otomatis: kalkulator dipanggil, hasilnya sama dengan kunci, angka kunci ada di jawaban, halaman sitasi cocok, dan fakta kunci soal definisi muncul. Pemeriksaan otomatis hanya bantuan; baca juga jawaban lengkap di laporannya.
+
+```powershell
+python src/evaluation/run_answer_tests.py                       # semua 44 soal
+python src/evaluation/run_answer_tests.py --tipe hitung         # 30 soal hitungan saja
+python src/evaluation/run_answer_tests.py --id H07,D11          # soal tertentu
+python src/evaluation/run_answer_tests.py --set inti            # kelompok soal (data/evaluation/test_sets.json)
+python src/evaluation/run_answer_tests.py --jeda 30             # jeda antar-soal (detik), disarankan di Groq free tier
+python src/evaluation/run_answer_tests.py --model <nama-model>  # model lain, penyedia sama (.env)
+python src/evaluation/run_answer_tests.py --lanjut reports/evaluation/answer_test_<...>.json   # lanjutkan run yang terhenti
+```
+
+Satu soal memakai ±7.000–10.000 token, jadi jatah harian Groq free tier (200.000 token/akun) hanya cukup ±28 soal. Laporan ditulis ulang setiap selesai satu soal. Bila jatah harian habis, run berhenti dan laporan tersimpan; lanjutkan sisanya dengan `--lanjut` (besok, atau dengan API key lain di `.env`). Batas per menit (429) ditunggu otomatis. **Jangan pakai data internal kampus** pada free tier, karena penyedia dapat memakainya.
+
+Evaluasi penuh sebaiknya diulang setiap kali model, prompt, kalkulator, atau data berubah. Jalankan juga `pytest` dan `eval_retrieval.py` untuk memastikan tidak ada yang turun.
+
+### Test set
 
 Test set ada di [data/evaluation/test_set_buku_iku.md](data/evaluation/test_set_buku_iku.md): 12 soal definisi & jebakan, 18 soal hitungan, dan 14 soal ketahanan (typo, bahasa santai, format angka/uang tidak baku). Setiap run menulis laporan bertanggal ke `reports/evaluation/`. Bandingkan metrik Hit@k, MRR, dan halaman sitasi. Jangan membandingkan angka *distance* antar-koleksi, karena koleksi v1 memakai L2 sedangkan v2 memakai cosine.
 
@@ -448,6 +500,9 @@ Ringkasnya (detail di [CONTRIBUTING.md](CONTRIBUTING.md)):
 | `401` / `API key not valid` | Key salah atau terpotong; salin ulang dari Google AI Studio |
 | `404` / model tidak ditemukan | Nama `LLM_MODEL` tidak tersedia untuk akunmu; cek daftar model di AI Studio |
 | `429` / kuota habis | Batas free tier tercapai; tunggu lalu coba lagi (klien mencoba ulang otomatis sebanyak `LLM_MAX_RETRIES`, default 2). Untuk evaluasi panjang di Groq, pakai `--jeda 30` |
+| Evaluasi berhenti dengan pesan jatah harian (`tokens per day`) | Jatah 200.000 token/hari per akun habis. Laporan tersimpan; lanjutkan dengan `run_answer_tests.py --lanjut <laporan.json>` setelah jatah pulih atau dengan API key lain |
+| Jawaban kosong, atau nama alat aneh (mis. `hitung_iku_`) di PERINGATAN | Perilaku model gratis (`gpt-oss`). Sudah ditangani dengan percobaan ulang otomatis dan dicatat di PERINGATAN; bukan berarti jawabannya salah |
+| Peringatan `.env` baris tertentu tidak terbaca | Baris di `.env` harus berformat `NAMA=nilai`; beri `#` di depan baris catatan atau akun yang tidak dipakai |
 | `503` / *high demand* | Server penyedia sedang penuh; coba lagi nanti atau ganti `LLM_MODEL` ke model lain |
 | Error 400 tentang *thought signature* / function call | Pesan asisten yang meminta alat harus dikirim balik apa adanya; jangan ubah baris `message.model_dump(exclude_none=True)` di `answer.py` |
 
@@ -458,4 +513,5 @@ Ringkasnya (detail di [CONTRIBUTING.md](CONTRIBUTING.md)):
 - [docs/02-desain/panduan_chunking.md](docs/02-desain/panduan_chunking.md): desain chunking v2 dan alasannya
 - [docs/02-desain/skema_embedding.md](docs/02-desain/skema_embedding.md): best practice embedding & retrieval, beserta status penerapannya
 - [docs/02-desain/integrasi_backend.md](docs/02-desain/integrasi_backend.md): **untuk tim Backend**: arsitektur, kontrak API, dan daftar tugas integrasi ke dasbor Monev IKU
+- [docs/03-evaluasi/laporan_evaluasi_akhir.md](docs/03-evaluasi/laporan_evaluasi_akhir.md): laporan evaluasi akhir chatbot (metrik, hasil per soal, kendala, langkah berikutnya). Versi Word/PDF ada di folder yang sama
 - [data/README.md](data/README.md): penjelasan setiap folder data
