@@ -364,7 +364,7 @@ async def health():
 
 
 @app.post("/v1/answer")
-async def answer(
+def answer(
     question: dict,
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
 ):
