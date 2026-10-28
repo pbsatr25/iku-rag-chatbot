@@ -5,6 +5,14 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/), ve
 ## [Unreleased]
 
 ### Ditambahkan
+- **Deteksi intent memakai konteks halaman** (`src/generation/intent.py`, menggantikan isi `detect_intent` di `app.py`):
+  - "IKU001" tanpa spasi dikenali; kepemilikan ("PT kami", "IKU 1 saya"), peringkat ("terendah", "ranking"), dan analisis/rangkuman unit dasbor (fakultas/prodi) dibaca sebagai `data`.
+  - Di halaman IKU, pertanyaan capaian/fakultas/prodi/analisis = data dasbor halaman itu; rumus & definisi tetap ke dokumen.
+  - Akurasi dataset tim `tests/intent_cases.json`: 39/48 → 48/48; 11 kasus halaman baru (PAGE-*): 6/11 → 11/11.
+  - `tests/test_intent.py` (pytest, berjalan di CI tanpa `openai`).
+
+### Diperbaiki
+- `KODE_IKU_RE` (`cakupan.py`) membaca huruf awal kata berikutnya sebagai sub-indikator ("IKU 9 dihitung" → 9d).
 - **Cakupan per halaman dasbor** (`src/generation/cakupan.py`, PRD Asisten IKU RAG-01–RAG-03):
   - `scope` di `POST /v1/answer` divalidasi; nilai tidak dikenal → `400`. Tanpa `scope` perilaku lama tetap (CLI, evaluasi).
   - Gerbang aturan **sebelum LLM**: kode IKU lain, topik khas IKU lain, atau konsep lintas IKU → `outOfScope: { suggestedTab }` dengan penolakan singkat, tanpa memakai kuota LLM.

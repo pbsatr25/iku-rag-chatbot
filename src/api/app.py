@@ -44,6 +44,7 @@ load_env()
 
 from answer import Chatbot  # noqa: E402
 from cakupan import CakupanTidakValid, baca_cakupan, periksa_cakupan, pesan_di_luar_cakupan  # noqa: E402
+from intent import deteksi_intent  # noqa: E402
 from tools import jalankan_spreadsheet_tool  # noqa: E402
 import iku_formulas as calc  # noqa: E402
 
@@ -61,60 +62,14 @@ def get_chatbot() -> Chatbot:
     return bot
 
 
-def detect_intent(question: str) -> str:
+def detect_intent(question: str, cakupan=None) -> str:
     """
-    Detect intent pertanyaan dengan keyword-based pattern matching.
-    Returns: "definisi", "formula", atau "data"
-
-    Priority:
-    1. "data" - jika menyebut data kampus (dengan/tanpa kata "saya"),
-                atau menanyakan nilai/angka/capaian/realisasi/target IKU
-    2. "formula" - jika tanya "rumus", "cara hitung"
-    3. "definisi" - default (tanya konsep/penjelasan IKU)
+    Jalur jawaban: "data" | "formula" | "definisi". Aturan lengkap di src/generation/intent.py.
 
     CATATAN: Semua intent "data" akan di-return sebagai fetch_data ke Next.js.
     Next.js yang mengambil spreadsheet user dari DB dan mengirim konteks ke sini.
-    jalankan_spreadsheet_tool() dengan email dummy TIDAK dipakai lagi.
     """
-    q_lower = question.lower()
-
-    # Intent: DATA
-    # Grup A: eksplisit menyebut kepemilikan user ("saya", "kampus saya", dll)
-    data_patterns_personal = [
-        r"\biku\s+\d+\s+saya\b",             # "IKU 1 saya"
-        r"\bnilai\s+(iku\s+\d+\s+)?saya\b",  # "nilai IKU 1 saya", "nilai saya"
-        r"\bkampus\s+saya\b",
-        r"\bpt\s+saya\b",
-        r"\bdata\s+(kampus|saya|kami)\b",
-        r"\bcapaian\s+(iku\s+\d+\s+)?saya\b",
-        r"\bberapa\s+(nilai\s+)?iku\s+\d+\s+saya\b",
-        r"\buniversitas\s+saya\b",
-        r"\binstitusi\s+saya\b",
-    ]
-
-    # Grup B: menanyakan nilai/angka/capaian IKU tanpa kata "saya"
-    # (pertanyaan yang memerlukan data spreadsheet, bukan definisi/rumus)
-    data_patterns_numeric = [
-        r"\b(berapa|tampilkan|lihat|tunjukkan|cek|periksa)\b.{0,40}\biku\s*\d+\b",
-        r"\biku\s*\d+\b.{0,40}\b(berapa|nilai|angka|capaian|skor|persentase|realisasi|target)\b",
-        r"\b(nilai|capaian|skor|realisasi|target|persentase)\b.{0,40}\biku\s*\d+\b",
-        r"\bdata\b.{0,30}\biku\s*\d+\b",
-        r"\b(berapa|nilai|capaian)\s+(iku\s+\d+|mahasiswa|lulusan|dosen|prodi|fakultas)\b",
-    ]
-
-    if any(re.search(p, q_lower) for p in data_patterns_personal):
-        return "data"
-
-    if any(re.search(p, q_lower) for p in data_patterns_numeric):
-        return "data"
-
-    # Intent: FORMULA
-    formula_keywords = ["rumus", "formula", "cara hitung", "cara menghitung", "bagaimana menghitung"]
-    if any(kw in q_lower for kw in formula_keywords):
-        return "formula"
-
-    # Intent: DEFINISI (default)
-    return "definisi"
+    return deteksi_intent(question, cakupan)
 
 
 
@@ -443,7 +398,7 @@ def answer(
             response["action"] = None  
             return response
 
-        intent = detect_intent(q)
+        intent = detect_intent(q, cakupan)
 
         if intent == "data":
             # Untuk pertanyaan data, kembalikan instruksi untuk fetch data

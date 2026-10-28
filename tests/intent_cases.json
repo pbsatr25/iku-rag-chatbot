@@ -2,7 +2,7 @@
   "metadata": {
     "description": "Dataset uji intent detection untuk baseline testing",
     "version": "1.0",
-    "total_cases": 48,
+    "total_cases": 59,
     "categories": {
       "data": "Butuh data dashboard kampus (capaian, angka real)",
       "definisi": "Pertanyaan tentang arti/pengertian IKU",
@@ -347,6 +347,94 @@
       "expected_intent": "formula",
       "expected_params": {"iku": "6"},
       "notes": "EDGE: 'berapa' tapi tanya tentang konstanta rumus, bukan data kampus"
+    },
+    {
+      "id": "PAGE-01",
+      "question": "rangkumkan analisis fakultas IKU001 saya",
+      "expected_intent": "data",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Kasus screenshot 28 Okt: 'IKU001' tanpa spasi + 'saya'"
+    },
+    {
+      "id": "PAGE-02",
+      "question": "fakultas mana yang capaiannya terendah?",
+      "expected_intent": "data",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Peringkat unit dasbor, tanpa kata kepemilikan"
+    },
+    {
+      "id": "PAGE-03",
+      "question": "prodi apa yang paling rendah?",
+      "expected_intent": "data",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Peringkat prodi"
+    },
+    {
+      "id": "PAGE-04",
+      "question": "ringkas capaian kampus kami",
+      "expected_intent": "data",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Rangkuman + kepemilikan"
+    },
+    {
+      "id": "PAGE-05",
+      "question": "Berapa capaian IKU 1?",
+      "expected_intent": "data",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Di halaman IKU 001 capaian = data dasbor yang sedang dilihat (bandingkan EDGE-01 tanpa halaman)"
+    },
+    {
+      "id": "PAGE-06",
+      "question": "rangkum analisis fakultas",
+      "expected_intent": "data",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Analisis tanpa kode IKU; konteks dari halaman"
+    },
+    {
+      "id": "PAGE-07",
+      "question": "Bagaimana rumus IKU 1?",
+      "expected_intent": "formula",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Rumus tetap dokumen walau di halaman IKU"
+    },
+    {
+      "id": "PAGE-08",
+      "question": "Apa definisi AEE?",
+      "expected_intent": "definisi",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "Definisi tetap dokumen walau di halaman IKU"
+    },
+    {
+      "id": "PAGE-09",
+      "question": "Berapa AEE ideal jenjang S1?",
+      "expected_intent": "definisi",
+      "scope": {"kind": "iku", "ikuCode": "IKU 001"},
+      "expected_params": {},
+      "notes": "'berapa' untuk konstanta di Buku, bukan data kampus"
+    },
+    {
+      "id": "PAGE-10",
+      "question": "Berapa SKS minimal agar kegiatan mahasiswa diakui?",
+      "expected_intent": "definisi",
+      "scope": {"kind": "iku", "ikuCode": "IKU 003"},
+      "expected_params": {},
+      "notes": "'berapa' + 'mahasiswa' untuk ketentuan Buku"
+    },
+    {
+      "id": "PAGE-11",
+      "question": "Saya ingin tahu rumus IKU 3",
+      "expected_intent": "formula",
+      "scope": null,
+      "expected_params": {},
+      "notes": "'saya' bukan kepemilikan data"
     }
   ]
 }

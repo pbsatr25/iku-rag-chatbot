@@ -27,8 +27,9 @@ TAB_DASBOR = {"IKU 001": "1", "IKU 002": "2", "IKU 003": "3",
 TAB_OVERVIEW = "Overview"
 IKU_KE_TAB = {iku_id: tab for tab, iku_id in TAB_DASBOR.items()}
 
-# "IKU 9", "iku-009", "IKU 11d", "IKU 3 LLDIKTI". (?!\d) mencegah "IKU 2025" terbaca IKU 20.
-KODE_IKU_RE = re.compile(r"\biku[\s-]*0*(\d{1,2})(?:\s*\(?\s*[a-d]\s*\)?)?(?!\d)", re.I)
+# "IKU 9", "iku-009", "IKU 11d", "IKU 3 LLDIKTI". (?!\d) mencegah "IKU 2025" terbaca IKU 20;
+# (?![a-z]) mencegah huruf awal kata berikutnya terbaca sub-indikator ("IKU 9 dihitung" bukan 9d).
+KODE_IKU_RE = re.compile(r"\biku[\s-]*0*(\d{1,2})(?:\s*\(?\s*[a-d](?![a-z])\s*\)?)?(?!\d)", re.I)
 
 # Topik khas IKU tanpa menyebut kode (PRD, deteksi langkah 2). Sengaja konservatif: kata yang
 # dipakai beberapa IKU (mis. "industri" juga muncul di magang IKU 3) tidak dipakai.
