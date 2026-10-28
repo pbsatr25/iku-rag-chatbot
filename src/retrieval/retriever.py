@@ -194,11 +194,17 @@ class Retriever:
 
     # -- pencarian ------------------------------------------------------------
 
-    def search(self, question):
+    def search(self, question, boleh=None, iku_cakupan=None):
+        """
+        boleh       : fungsi metadata -> bool; chunk yang tidak lolos dibuang (filter cakupan halaman).
+        iku_cakupan : iku_id halaman IKU aktif; chunk IKU ini dipastikan masuk kandidat & didahulukan.
+        """
         query_emb = np.asarray(self.model.encode([question], normalize_embeddings=True)[0])
+        # dengan filter, sebagian kandidat akan dibuang -> ambil kandidat lebih banyak
+        n_kandidat = self.candidates if boleh is None else self.candidates * 4
 
         # 1) dense: jarak diambil langsung dari Chroma (sesuai metrik koleksi: L2 lama / cosine v2)
-        dense = self.collection.query(query_embeddings=[query_emb.tolist()], n_results=self.candidates,
+        dense = self.collection.query(query_embeddings=[query_emb.tolist()], n_results=n_kandidat,
                                       include=["documents", "metadatas", "distances"])
         pool = {i: {"id": i, "document": d, "metadata": m, "distance": dist}
                 for i, d, m, dist in zip(dense["ids"][0], dense["documents"][0],
@@ -207,8 +213,12 @@ class Retriever:
         # 2-3) daftar peringkat tambahan, lalu digabung dengan RRF
         rankings = [dense["ids"][0]]
         if self.bm25:
-            rankings.append([self.corpus_ids[i] for i in self.bm25.top(tokenize(question), self.candidates)])
+            rankings.append([self.corpus_ids[i] for i in self.bm25.top(tokenize(question), n_kandidat)])
         targets = mentioned_iku(question) if self.iku_boost else []
+        if iku_cakupan:
+            # di halaman IKU hanya IKU itu yang relevan; tanpa penyebutan, IKU halaman jadi target
+            targets = [t for t in targets if t["iku_id"] == iku_cakupan] or [{"iku_id": iku_cakupan, "jenis": "iku"}]
+            rankings.append(self._query_ids(query_emb, self.candidates, where_and(iku_id=iku_cakupan)))
         for t in targets:
             rankings.append(self._query_ids(query_emb, 10, where_and(iku_id=t["iku_id"], jenis=t["jenis"])))
 
@@ -248,6 +258,8 @@ class Retriever:
         output = []
         for it in items:
             if self.min_chars and len(it["document"].strip()) < self.min_chars:
+                continue
+            if boleh is not None and not boleh(it["metadata"]):
                 continue
             output.append(it)
             if len(output) == self.top_k:

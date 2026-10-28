@@ -43,6 +43,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "calculator"))
 load_env()
 
 from answer import Chatbot  # noqa: E402
+from cakupan import CakupanTidakValid, baca_cakupan, periksa_cakupan, pesan_di_luar_cakupan  # noqa: E402
 from tools import jalankan_spreadsheet_tool  # noqa: E402
 import iku_formulas as calc  # noqa: E402
 
@@ -373,13 +374,14 @@ def answer(
 
     Body:
         - question: string
-        - scope: object atau null (opsional)
+        - scope: {kind: "overview"} | {kind: "iku", ikuCode: "IKU 001"} (halaman dasbor aktif).
+          Tanpa scope = tanpa batas cakupan (kompatibel dengan klien lama). Scope tidak dikenal -> 400.
 
     Response:
         - answer: string
         - citations: list (dari sitasi)
         - grounded: boolean
-        - outOfScope: boolean atau null
+        - outOfScope: {suggestedTab} jika pertanyaan di luar cakupan halaman, selain itu null
         - action: {type: "fetch_data"} jika butuh data spreadsheet
     """
     # Load .env (in case of reload)
@@ -412,12 +414,30 @@ def answer(
         )
 
     try:
-        # DETEKSI INTENT dengan LLM
+        cakupan = baca_cakupan(scope)
+    except CakupanTidakValid as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+    # Gerbang cakupan SEBELUM intent & LLM: pertanyaan IKU lain tidak dijawab substantif
+    # dan tidak memakai kuota LLM (PRD Asisten IKU, RAG-03).
+    tab_tujuan = periksa_cakupan(q, cakupan)
+    if cakupan and tab_tujuan:
+        logger.info(f"Di luar cakupan {cakupan.tab} -> {tab_tujuan}")
+        return {
+            "answer": pesan_di_luar_cakupan(cakupan, tab_tujuan),
+            "citations": [],
+            "blocks": None,
+            "grounded": True,
+            "outOfScope": {"suggestedTab": tab_tujuan},
+            "action": None,
+        }
+
+    try:
         chatbot = get_chatbot()
 
         # Jika sudah ada spreadsheet_context (second call dari Next.js), langsung proses dengan RAG
         if spreadsheet_context:
-            hasil = chatbot.ask_with_spreadsheet(q, spreadsheet_context)
+            hasil = chatbot.ask_with_spreadsheet(q, spreadsheet_context, cakupan)
             # Izinkan format_response memproses sitasi yang ditemukan dari RAG chunks
             response = format_response(hasil, "data", include_citations=True)
             response["action"] = None  
@@ -446,7 +466,7 @@ def answer(
             return response
 
         # Intent bukan "data" -> proses normal dengan RAG
-        hasil = chatbot.ask(q)
+        hasil = chatbot.ask(q, cakupan)
         response = format_response(hasil, intent)
         return response
 

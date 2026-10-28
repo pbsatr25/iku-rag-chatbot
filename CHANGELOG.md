@@ -4,6 +4,14 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/), ve
 
 ## [Unreleased]
 
+### Ditambahkan
+- **Cakupan per halaman dasbor** (`src/generation/cakupan.py`, PRD Asisten IKU RAG-01–RAG-03):
+  - `scope` di `POST /v1/answer` divalidasi; nilai tidak dikenal → `400`. Tanpa `scope` perilaku lama tetap (CLI, evaluasi).
+  - Gerbang aturan **sebelum LLM**: kode IKU lain, topik khas IKU lain, atau konsep lintas IKU → `outOfScope: { suggestedTab }` dengan penolakan singkat, tanpa memakai kuota LLM.
+  - Retrieval difilter `iku_id` halaman (`Retriever.search(boleh=, iku_cakupan=)`); Overview memakai chunk umum + IKU tanpa halaman dasbor.
+  - Cakupan aktif ditulis eksplisit di system prompt kedua jalur jawaban (`ask`, `ask_with_spreadsheet`).
+  - 42 unit test tanpa GPU (`tests/test_cakupan.py`).
+
 ### Direncanakan
 - Tahap 7: LLM + sitasi (konteks top-k + `source_notes`, kalkulator via *tool calling*)
 - Manifest embedding (model, revisi, hash chunk) dan cek kesehatan vektor

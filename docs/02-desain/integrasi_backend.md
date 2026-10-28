@@ -28,7 +28,7 @@ Acuan kebutuhan: [PRD Asisten IKU — Chatbot RAG per Halaman Dasbor](../../PRD%
 | LLM + tool calling kalkulator + sitasi halaman dari metadata | ✅ (terminal) | `src/generation/answer.py` |
 | Penyedia LLM bisa diganti lewat `.env` (Groq, Gemini, Ollama, OpenAI) | ✅ | `src/generation/llm_client.py` |
 | Evaluasi otomatis 44 soal (definisi, hitungan, typo, format uang) | ✅ | `src/evaluation/run_answer_tests.py` |
-| **Cakupan per halaman** (filter `ikuCode`, tolak pertanyaan IKU lain) | ⬜ belum | – |
+| **Cakupan per halaman** (gerbang aturan sebelum LLM, filter retrieval `iku_id`, instruksi prompt) | ✅ (tanpa fallback semantik) | `src/generation/cakupan.py`, `tests/test_cakupan.py` |
 | **Layanan HTTP** yang mengembalikan format `ChatAnswer` | ⬜ belum | – |
 | Multi-turn (riwayat percakapan) | ⬜ belum, saat ini tiap pertanyaan berdiri sendiri | – |
 | Streaming SSE | ⬜ tahap 2 | – |
@@ -81,7 +81,7 @@ Konsekuensi untuk BE: ada **satu proses tambahan** yang harus di-deploy (lihat [
 | 1 | Di mana RAG berjalan? | (a) layanan Python terpisah, (b) port ke TypeScript | **(a)** |
 | 2 | Penyimpanan vektor | (a) ChromaDB (sudah jalan, file lokal), (b) pgvector di PostgreSQL dasbor (sesuai PRD) | **(a) untuk MVP**, pindah ke (b) bila tim ingin satu database. bge-m3 = 1024 dimensi, muat di pgvector |
 | 3 | Dokumen yang di-index | (a) Buku IKU V1 saja (sesuai PRD), (b) Buku + PPT | **(a)** untuk versi ini |
-| 4 | Chunk IKU tanpa halaman dasbor (IKU 4, 6, 8, 10–12, LLDIKTI) | (a) tidak pernah muncul, (b) muncul di cakupan Overview | perlu keputusan PO |
+| 4 | Chunk IKU tanpa halaman dasbor (IKU 4, 6, 8, 10–12, LLDIKTI) | (a) tidak pernah muncul, (b) muncul di cakupan Overview | perlu keputusan PO; **sementara diterapkan (b)** di `cakupan.py` (`chunk_boleh`, `tab_untuk`) |
 | 5 | Siapa menambahkan `disclaimer`, `conversationId`, `messageId` | (a) BE, (b) layanan RAG | **(a) BE**, karena BE yang menyimpan percakapan |
 
 ## 4. Kontrak API
@@ -180,7 +180,7 @@ Dikerjakan tim AI di layanan RAG; dicantumkan agar BE tahu asal setiap field.
 | `blocks` `note` | catatan tafsir rumus (`catatan`) dan catatan cacat dokumen sumber |
 | `blocks` `metric` | butuh `target` dari tabel `iku_targets`, jadi baru tersedia setelah data dasbor tersambung (tahap 2) |
 | `grounded` | `false` bila chatbot menyatakan informasi tidak ditemukan atau tidak ada konteks yang relevan |
-| `outOfScope` | dari gerbang cakupan (belum dibuat) |
+| `outOfScope` | dari gerbang cakupan `periksa_cakupan()` (`src/generation/cakupan.py`): `{ suggestedTab }`, dijawab tanpa memanggil LLM |
 | `debug.warnings` | `peringatan` (tidak ditampilkan ke user) |
 
 ## 5. Tugas Backend
