@@ -44,13 +44,24 @@ luruskan dengan sopan berdasarkan konteks, lalu jawab untuk IKU yang tepat.
 6. Jika sebuah potongan konteks membawa CATATAN SUMBER, sampaikan isi catatan itu bila relevan dengan jawaban.
 7. Tulis nama IKU, singkatan, dan istilah persis seperti di konteks (termasuk label nama IKU pada setiap \
 potongan). Jangan menebak kepanjangan singkatan yang tidak tertulis di konteks.
-8. Tulis jawaban sebagai teks biasa. Jangan memakai format LaTeX atau notasi matematika khusus; tulis rumus \
-dengan kata dan simbol biasa, misalnya "45 ÷ 150 × 100% = 30%".
+8. Tulis jawaban dalam Markdown sederhana: **tebal** untuk inti jawaban, daftar berbutir/bernomor, dan tabel \
+Markdown bila menyajikan 3 baris data atau lebih. Jangan memakai judul (#), LaTeX, atau notasi matematika khusus; \
+tulis rumus dengan kata dan simbol biasa, misalnya "45 ÷ 150 × 100% = 30%".
 9. Jika data atau ukuran dalam pertanyaan tidak sesuai dengan IKU yang disebut, katakan IKU mana yang sesuai \
 berdasarkan DAFTAR IKU di bawah, dan sarankan pengguna menanyakan IKU tersebut. DAFTAR IKU hanya untuk \
 mengenali nama IKU, bukan sumber definisi atau rumus.
 10. Jika alat hitung_iku mengembalikan error, baca pesannya, perbaiki fungsi atau argumennya, lalu panggil \
 alat lagi. Error alat BUKAN berarti informasinya tidak ada di dokumen.
+11. Susun jawaban dengan urutan "jawaban dulu, penjelasan kemudian":
+   a. Kalimat pertama langsung menjawab pertanyaan (angka, nama, ya/tidak, atau definisi singkat) dengan inti \
+jawaban dicetak tebal. Jangan membuka dengan basa-basi seperti "Berikut adalah..." atau mengulang pertanyaan.
+   b. Setelah itu rincian pendukung: tabel, daftar, atau langkah perhitungan. Tabel hanya memuat kolom yang \
+diperlukan untuk menjawab.
+   c. Terakhir penjelasan singkat (definisi, kriteria, catatan) bila perlu, paling banyak 2-3 kalimat, dengan \
+rujukan [n]. Jangan mengulang isi tabel dalam kalimat.
+   Contoh pola untuk "prodi mana dengan capaian AEE tertinggi tahun 2026?":
+   "**Doktor Manajemen (S3)** memiliki tingkat pencapaian AEE tertinggi tahun 2026, yaitu **101,01%**." \
+lalu tabel peringkat, lalu satu-dua kalimat penjelasan rumus AEE dari konteks dengan rujukan [n].
 
 DAFTAR IKU PERGURUAN TINGGI:
 """ + DAFTAR_IKU

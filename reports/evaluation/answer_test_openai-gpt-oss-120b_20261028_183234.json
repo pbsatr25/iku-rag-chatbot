@@ -1,0 +1,68 @@
+{
+  "model": "openai/gpt-oss-120b",
+  "status": "selesai",
+  "rencana": [
+    "H25"
+  ],
+  "belum_selesai": [],
+  "results": [
+    {
+      "id": "H25",
+      "pertanyaan": "total pendapatan PT 500 M. rinciannya ukt 300M, boptn 80 M, hibah riset 50M, konsultasi 40 M, unit bisnis 20M, hasil dana abadi 10 M. iku 9 brp?",
+      "jawaban_benar": "**24%**.",
+      "halaman_kunci": [
+        59
+      ],
+      "harapan_angka": 24.0,
+      "catatan": "Ketahanan: satuan 'M' = miliar, ditulis rapat/berspasi ('300M', '80 M'). Argumen boleh dalam miliar asal konsisten. Sama dengan H13.",
+      "lulus": true,
+      "jawaban": "IKU 9 – Persentase Pendapatan Non Pendidikan/UKT dihitung dengan rumus:\n\nCapaian = (Jumlah pendapatan non-mahasiswa ÷ Total pendapatan PT dalam satu periode) × 100 %\n\nPendapatan non-mahasiswa yang termasuk (menurut kriteria) adalah:\n- Hibah riset = 50 M  \n- Konsultasi = 40 M  \n- Unit bisnis = 20 M  \n- Hasil dana abadi = 10 M  \n\nJumlah pendapatan non-mahasiswa = 50 M + 40 M + 20 M + 10 M = **120 M**.\n\nTotal pendapatan PT = **500 M**.\n\nMenggunakan kalkulator IKU 9:\n\n**Capaian = 120 M ÷ 500 M × 100 % = 24 %**【iku9】.",
+      "sitasi": [],
+      "sumber_rumus": [
+        "Buku IKU Diktisaintek Berdampak V1, IKU 9 – Kriteria & Formula, hlm. 59"
+      ],
+      "kalkulator": [
+        {
+          "argumen": "{\"argumen_json\":\"{\\\"total_pendapatan\\\": \\\"500 M\\\", \\\"rincian\\\": {\\\"hibah_riset\\\": \\\"50 M\\\", \\\"konsultasi\\\": \\\"40 M\\\", \\\"unit_bisnis\\\": \\\"20 M\\\", \\\"hasil_dana_abadi\\\": \\\"10 M\\\"}}\",\"fungsi\":\"iku9\"}",
+          "hasil": {
+            "id": "iku9",
+            "ikuCode": "IKU 009",
+            "hasil": 24.0,
+            "satuan": "%",
+            "langkah": [
+              "Total pendapatan: \"500 M\" = Rp500.000.000.000",
+              "hibah_riset: \"50 M\" = Rp50.000.000.000 → DIHITUNG (Kriteria a)",
+              "konsultasi: \"40 M\" = Rp40.000.000.000 → DIHITUNG (Kriteria a)",
+              "unit_bisnis: \"20 M\" = Rp20.000.000.000 → DIHITUNG (Kriteria a)",
+              "hasil_dana_abadi: \"10 M\" = Rp10.000.000.000 → DIHITUNG (Kriteria a)",
+              "Catatan: rincian berjumlah 120.000.000.000 dari total 500.000.000.000; selisih 380.000.000.000 dianggap pendapatan lain yang tidak dihitung",
+              "Capaian = 120.000.000.000 / 500.000.000.000 × 100% = 24%"
+            ],
+            "formula_teks": [
+              "Capaian = Pendapatan yang diakui (non-mahasiswa) ÷ Total pendapatan PT satu periode × 100%"
+            ],
+            "sumber": "Buku IKU Diktisaintek Berdampak V1, IKU 9 – Kriteria & Formula, hlm. 59",
+            "rujukan": {
+              "dokumen": "Buku IKU Diktisaintek Berdampak",
+              "versi": "V1",
+              "bagian": "IKU 9 – Kriteria & Formula",
+              "halaman": [
+                59
+              ]
+            },
+            "status": "terverifikasi"
+          }
+        }
+      ],
+      "peringatan": [
+        "Jawaban tidak memuat rujukan [n] ke konteks."
+      ],
+      "cek": {
+        "kalkulator dipanggil": true,
+        "hasil kalkulator = kunci": true,
+        "angka kunci ada di jawaban": true,
+        "halaman sitasi benar": true
+      }
+    }
+  ]
+}

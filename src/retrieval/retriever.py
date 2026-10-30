@@ -48,7 +48,8 @@ PRIMARY_SOURCE_PREFIX = "Buku"
 
 STOPWORDS = set("""yang dan di ke dari untuk dengan atau pada dalam adalah ini itu berapa apa
 sebuah suatu oleh sebagai tersebut tidak akan juga dapat bagi serta per jika maka""".split())
-IKU_IN_QUESTION_RE = re.compile(r"\bIKU\s*(\d{1,2})(?:\s*\(?\s*([a-d])\s*\)?)?(?!\d)", re.I)
+# (?![a-z]): huruf awal kata berikutnya bukan sub-indikator ("IKU 1 apa itu" bukan 1a)
+IKU_IN_QUESTION_RE = re.compile(r"\bIKU\s*(\d{1,2})(?:\s*\(?\s*([a-d])(?![a-z])\s*\)?)?(?!\d)", re.I)
 # maksud pertanyaan -> bagian tabel definisi yang didahulukan di antara chunk IKU yang disebut
 BAGIAN_INTENT = [
     (re.compile(r"\b(apa itu|apa yang dimaksud|pengertian|definisi|maksud dari)\b", re.I), ("Definisi",)),

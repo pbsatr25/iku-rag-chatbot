@@ -17,12 +17,15 @@ import re
 import sys
 from pathlib import Path
 import openai
-from spreadsheet_calc import precalculate_spreadsheet
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "retrieval"))
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "generation"))
+# spreadsheet_calc butuh iku_formulas; path ini harus ada sebelum import, agar answer.py
+# juga bisa dipakai di luar app.py (chat_cli.py, run_answer_tests.py)
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "calculator"))
 
+from spreadsheet_calc import precalculate_spreadsheet  # noqa: E402
 from retriever import Retriever  # noqa: E402
 from llm_client import get_client  # noqa: E402
 from postproses import angka_muncul, rapikan_jawaban, tampak_menghitung_sendiri, varian_angka  # noqa: E402,F401
@@ -201,7 +204,7 @@ class Chatbot:
             f"{enriched_context}\n\n"
             "INSTRUKSI PENJAWABAN DATA KAMPUS (PENTING):\n"
             "- Seluruh angka Rekap, Pembilang, Penyebut, dan Tabel di atas SUDAH dihitung secara resmi oleh kalkulator server.\n"
-            "- JANGAN memanggil fungsi/alat/tool apa pun (termasuk hitung_iku, python, atau container.exec). Cukup baca dan tulis ulang rincian angka yang sudah tersedia di atas dalam bentuk teks biasa.\n"
+            "- JANGAN memanggil fungsi/alat/tool apa pun (termasuk hitung_iku, python, atau container.exec). Cukup baca dan tulis ulang rincian angka yang sudah tersedia di atas mengikuti aturan format nomor 8 dan 11.\n"
             "- Gunakan langsung angka dari bagian Rekap atau Tabel sesuai pertanyaan user.\n"
             "- Sertakan sitasi [1], [2], [3] dari potongan dokumen ketika menjelaskan definisi, kriteria, atau rumus IKU."
         )
