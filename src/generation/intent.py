@@ -8,6 +8,10 @@ Menentukan jalur jawaban sebuah pertanyaan, tanpa LLM:
 - "definisi" : definisi, kriteria, ketentuan, atau pertanyaan lain dari Buku IKU.
 
 Aturan dievaluasi berurutan (yang pertama cocok menang):
+0. Pengguna menulis sendiri angka datanya (minimal dua angka selain nomor IKU dan tahun, mis.
+   "400 responden, 280 bekerja") -> formula: dihitung kalkulator dari angka itu, bukan data
+   dasbor. Tanpa aturan ini, soal hitungan di halaman IKU ikut aturan 4 dan dijawab dengan
+   data spreadsheet kampus.
 1. Sinyal data kuat: kepemilikan ("IKU 1 saya", "PT kami"), peringkat ("terendah",
    "ranking"), "data IKU 1"/"data 2025", atau tahun + IKU/capaian.
 2. Kata rumus/cara hitung -> formula.
@@ -45,6 +49,11 @@ FORMULA_RE = re.compile(r"\b(rumus|rumusnya|formula|bobot|(cara|langkah) (meng)?
 DEFINISI_RE = re.compile(r"\b(apa itu|apa yang dimaksud|pengertian|definisi|arti|maksud|jelaskan"
                          r"|kriteria|ketentuan|itu apa)\b")
 
+# Angka data dari pengguna. Nomor IKU dan tahun dibuang lebih dulu; "s1"/"d3" tidak terhitung
+# karena angkanya menempel pada huruf.
+IKU_ATAU_TAHUN_RE = re.compile(r"\biku \d+\b|\b20[2-3]\d\b")
+ANGKA_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*(?!\w)")
+
 UNIT_DASBOR_RE = re.compile(r"\b(fakultas|prodi|program studi|jurusan)\b")
 CAPAIAN_HALAMAN_RE = re.compile(r"\b(capaian|capaiannya|realisasi|skor)\b")
 TANYA_ANGKA_RE = re.compile(r"\b(berapa|brp|jumlah|total|tampilkan|lihat|tunjukkan|cek|periksa"
@@ -62,6 +71,10 @@ def normalisasi(pertanyaan: str) -> str:
 def deteksi_intent(pertanyaan: str, cakupan: Cakupan | None = None) -> str:
     q = normalisasi(pertanyaan)
     sebut_iku = re.search(r"\biku \d+\b", q) is not None
+
+    # 0) angka data ditulis pengguna -> hitung dengan kalkulator
+    if len(ANGKA_RE.findall(IKU_ATAU_TAHUN_RE.sub(" ", q))) >= 2:
+        return FORMULA
 
     # 1) sinyal data kuat
     if (KEPEMILIKAN_RE.search(q) or PERINGKAT_RE.search(q)

@@ -32,6 +32,19 @@ def test_konteks_halaman_mengubah_jalur():
     assert deteksi_intent(pertanyaan, None) == FORMULA
 
 
+@pytest.mark.parametrize("pertanyaan, harapan", [
+    # angka dari pengguna -> kalkulator, walau di halaman IKU dan memuat kata "capaian"
+    ("Tracer study mengumpulkan 400 responden lulusan S1. Sebanyak 280 lulusan bekerja dengan masa "
+     "tunggu < 6 bulan dan gaji > 1,2× UMP; sisanya belum bekerja. Berapa capaian IKU 2?", FORMULA),
+    ("Prodi saya punya 200 mahasiswa, 40 lulus tepat waktu. Berapa capaian IKU 1?", FORMULA),
+    # nomor IKU, tahun, jenjang, dan "top 10" bukan angka data pengguna
+    ("Berapa capaian IKU 2 tahun 2025?", DATA),
+    ("Tampilkan top 10 prodi S1 dengan capaian tertinggi 2026", DATA),
+])
+def test_angka_dari_pengguna_dihitung_kalkulator(pertanyaan, harapan):
+    assert deteksi_intent(pertanyaan, baca_cakupan({"kind": "iku", "ikuCode": "IKU 002"})) == harapan
+
+
 def test_overview_tidak_memakai_konteks_halaman():
     """Data Overview lintas IKU, sedangkan fetch_data saat ini mengambil satu IKU."""
     assert deteksi_intent("rangkum analisis", baca_cakupan({"kind": "overview"})) == DEFINISI
